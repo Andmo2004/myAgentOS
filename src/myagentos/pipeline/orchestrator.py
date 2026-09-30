@@ -12,9 +12,10 @@ from typing import Any
 
 from myagentos.context.compiler import ContextCompiler
 from myagentos.core.models.event import EventActor, EventName
-from myagentos.core.models.failure import ObservedFailure
+from myagentos.core.models.failure import FailureCode, ObservedFailure
 from myagentos.core.models.patch import PatchSet
 from myagentos.core.models.plan import PlanSpec
+from myagentos.core.models.review import DiffApproval, ReviewResult, ReviewSpec
 from myagentos.core.models.risk import RiskLevel
 from myagentos.core.store.event_store import EventStore
 from myagentos.failure.healing import HealingCoordinator
@@ -25,6 +26,7 @@ from myagentos.pipeline.models import PipelineConfig, PipelineResult
 from myagentos.planner.agent import PlannerAgent
 from myagentos.planner.models import PlannerInput
 from myagentos.policy.engine import PolicyEngine
+from myagentos.reviewer import DiffApprovalManager, IndependentReviewer
 from myagentos.router.models import RoutingIntent
 from myagentos.router.rules import LocalRouter
 from myagentos.sandbox.base import SandboxDriver
@@ -47,6 +49,8 @@ class PipelineOrchestrator:
         policy_engine: PolicyEngine | None = None,
         sandbox_driver: SandboxDriver | None = None,
         healing_coordinator: HealingCoordinator | None = None,
+        independent_reviewer: IndependentReviewer | None = None,
+        diff_approval_manager: DiffApprovalManager | None = None,
     ) -> None:
         self.config = config
         self.repo_root = config.repo_root.resolve()
@@ -56,6 +60,10 @@ class PipelineOrchestrator:
         self.policy_engine = policy_engine or PolicyEngine()
         self.sandbox_driver = sandbox_driver or MockSandboxDriver()
         self.healing_coordinator = healing_coordinator or HealingCoordinator()
+        self.independent_reviewer = independent_reviewer or IndependentReviewer(
+            gateway=self.gateway
+        )
+        self.diff_approval_manager = diff_approval_manager or DiffApprovalManager()
 
         self.router = LocalRouter()
         self.context_compiler = ContextCompiler(
@@ -354,13 +362,46 @@ class PipelineOrchestrator:
                     payload={"risk_escalated": False},
                 )
 
-            # 10. Independent Review & Diff Approval
+            # 10. Independent Review & Diff Approval (§15)
+            review_spec = ReviewSpec(
+                job_id=job_id,
+                patch_set=patch_set,
+                plan=plan,
+                risk_level=assessment.level,
+                worker_model_id=self.config.model_id,
+                reviewer_model=self.config.reviewer_model_id,
+            )
+            review_res = self.independent_reviewer.review(review_spec)
+
+            if not review_res.passed:
+                controller.transition(
+                    EventName.FAILURE_CLASSIFIED,
+                    EventActor.INDEPENDENT_REVIEWER,
+                    payload={
+                        "code": FailureCode.REVIEW_REJECTED.value,
+                        "findings": review_res.security_findings + review_res.quality_findings,
+                    },
+                )
+                return self._build_result(
+                    job_id=job_id,
+                    success=False,
+                    controller=controller,
+                    intent=decision.intent.value,
+                    plan=plan,
+                    patch_set=patch_set,
+                    verification=verification_res,
+                    review=review_res,
+                    summary=f"Independent review failed: {review_res.summary}",
+                    duration_seconds=time.monotonic() - t0,
+                )
+
             state, _ = controller.transition(
                 EventName.REVIEW_COMPLETED,
                 EventActor.INDEPENDENT_REVIEWER,
                 payload={"risk_level": assessment.level.value},
             )
 
+            diff_approval = None
             if state == JobState.WAIT_DIFF_APPROVAL:
                 diff_approved = self._request_diff_approval(patch_set)
                 if not diff_approved:
@@ -373,10 +414,24 @@ class PipelineOrchestrator:
                         plan=plan,
                         patch_set=patch_set,
                         verification=verification_res,
+                        review=review_res,
                         summary="Diff approval rejected by user",
                         duration_seconds=time.monotonic() - t0,
                     )
+                diff_approval = self.diff_approval_manager.create_approval(
+                    job_id=job_id,
+                    patch_set=patch_set,
+                    approved=True,
+                    approved_by="user",
+                )
                 controller.transition(EventName.APPROVAL_GRANTED, EventActor.USER)
+            else:
+                diff_approval = self.diff_approval_manager.create_approval(
+                    job_id=job_id,
+                    patch_set=patch_set,
+                    approved=True,
+                    approved_by="policy",
+                )
 
             # 11. Merge Check & Merge
             # Apply sealed patch set to repository root
@@ -402,6 +457,8 @@ class PipelineOrchestrator:
                 approval=approval,
                 patch_set=patch_set,
                 verification=verification_res,
+                review=review_res,
+                diff_approval=diff_approval,
                 summary=(
                     f"Successfully applied {patch_set.total_files} file changes "
                     f"({patch_set.total_diff_lines} lines)"
@@ -490,6 +547,8 @@ class PipelineOrchestrator:
         approval: Any | None = None,
         patch_set: PatchSet | None = None,
         verification: VerificationResult | None = None,
+        review: ReviewResult | None = None,
+        diff_approval: DiffApproval | None = None,
         summary: str = "",
     ) -> PipelineResult:
         chain_ok, _ = self.event_store.verify_integrity(job_id)
@@ -504,6 +563,8 @@ class PipelineOrchestrator:
             approval=approval,
             patch_set=patch_set,
             verification=verification,
+            review=review,
+            diff_approval=diff_approval,
             audit_events_count=len(events),
             hash_chain_intact=chain_ok,
             duration_seconds=duration_seconds,

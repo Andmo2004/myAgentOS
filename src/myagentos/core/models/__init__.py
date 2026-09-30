@@ -11,6 +11,14 @@ from myagentos.core.models.failure import (
 )
 from myagentos.core.models.patch import FilePatch, PatchOperation, PatchSet
 from myagentos.core.models.plan import MicroPlan, PlanApproval, PlanSpec
+from myagentos.core.models.review import (
+    DiffApproval,
+    ReviewComment,
+    ReviewResult,
+    ReviewSeverity,
+    ReviewSpec,
+    ReviewVerdict,
+)
 from myagentos.core.models.risk import (
     RiskAssessment,
     RiskLevel,
@@ -45,4 +53,10 @@ __all__ = [
     "EventActor",
     "EventName",
     "GENESIS_HASH",
+    "ReviewVerdict",
+    "ReviewSeverity",
+    "ReviewComment",
+    "ReviewSpec",
+    "ReviewResult",
+    "DiffApproval",
 ]
