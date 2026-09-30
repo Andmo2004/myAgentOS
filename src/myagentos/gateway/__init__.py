@@ -1,6 +1,7 @@
 """Model Gateway and provider adapter exports."""
 
 from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
+from myagentos.gateway.claude_adapter import ClaudeAdapter
 from myagentos.gateway.client import ModelGateway
 from myagentos.gateway.gemini_adapter import GeminiAdapter
 from myagentos.gateway.mock_adapter import MockProviderAdapter
@@ -17,4 +18,5 @@ __all__ = [
     "MockProviderAdapter",
     "OpenAIAdapter",
     "GeminiAdapter",
+    "ClaudeAdapter",
 ]

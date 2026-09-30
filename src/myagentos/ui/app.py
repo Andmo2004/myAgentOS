@@ -67,8 +67,8 @@ HELP_TEXT = """\
   /compact, /dense       toggle display density
 
 [bold cyan]Config & Models:[/bold cyan]
-  /key [provider] [key]  configura claves API (openai, gemini) y guarda en .env 🟢
-  /model [name]          muestra o cambia el modelo activo (gpt-4o, gemini-2.0-flash...) 🟢
+  /key [provider] [key]  configura claves API (claude, openai, gemini) en .env 🟢
+  /model [name]          cambia modelo activo (claude-3-5-sonnet, gpt-4o, gemini) 🟢
 """
 
 
@@ -245,6 +245,7 @@ class MyaApp(App[None]):
 
         has_openai = bool(os.getenv("OPENAI_API_KEY"))
         has_gemini = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+        has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
 
         if has_openai:
             try:
@@ -262,9 +263,19 @@ class MyaApp(App[None]):
             except Exception:
                 pass
 
+        if has_anthropic:
+            try:
+                from myagentos.gateway.claude_adapter import ClaudeAdapter
+
+                gateway.register_adapter("anthropic", ClaudeAdapter())
+            except Exception:
+                pass
+
         default_model = "mock-mya"
         if requested_model:
             default_model = requested_model
+        elif has_anthropic:
+            default_model = "claude-3-5-sonnet-latest"
         elif has_openai:
             default_model = "gpt-4o"
         elif has_gemini:
@@ -604,19 +615,23 @@ class MyaApp(App[None]):
 
         openai_key = os.getenv("OPENAI_API_KEY", "")
         gemini_key = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
 
         if not args or not args[0]:
+            claude_status = _mask(anthropic_key)
             openai_status = _mask(openai_key)
             gemini_status = _mask(gemini_key)
             active_model = self.mya_agent.model_id
 
             self._append_mya_message(
                 f"{badge} [bold]CONFIGURACIÓN DE CLAVES API Y MODELOS[/bold]\n\n"
-                f"  • [bold]OpenAI[/bold] (OPENAI_API_KEY):  {openai_status}\n"
-                f"  • [bold]Gemini[/bold] (GEMINI_API_KEY):  {gemini_status}\n"
-                f"  • [bold]Modelo activo[/bold]:          [bold cyan]{active_model}[/bold cyan]\n"
-                f"  • [bold]Archivo de claves[/bold]:      .env\n\n"
+                f"  • [bold]Claude[/bold] (ANTHROPIC_API_KEY): {claude_status}\n"
+                f"  • [bold]OpenAI[/bold] (OPENAI_API_KEY):    {openai_status}\n"
+                f"  • [bold]Gemini[/bold] (GEMINI_API_KEY):    {gemini_status}\n"
+                f"  • [bold]Modelo activo[/bold]:         [bold cyan]{active_model}[/bold cyan]\n"
+                f"  • [bold]Archivo de claves[/bold]:        .env\n\n"
                 f"[dim]Uso para configurar:[/dim]\n"
+                f"  [bold]/key claude <tu_clave>[/bold]    Claude (activa claude-3-5-sonnet)\n"
                 f"  [bold]/key openai <tu_clave>[/bold]    OpenAI (activa gpt-4o)\n"
                 f"  [bold]/key gemini <tu_clave>[/bold]    Gemini (activa gemini-2.0-flash)\n"
                 f"  [bold]/model <nombre>[/bold]           Cambiar modelo (ej: gpt-4o-mini)"
@@ -690,10 +705,39 @@ class MyaApp(App[None]):
                 f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
             )
 
+        elif provider in ("claude", "anthropic"):
+            self._save_env_var("ANTHROPIC_API_KEY", key_value)
+            os.environ["ANTHROPIC_API_KEY"] = key_value
+            try:
+                from myagentos.gateway.claude_adapter import ClaudeAdapter
+
+                self.gateway.register_adapter("anthropic", ClaudeAdapter(api_key=key_value))
+            except Exception as err:
+                self._append_mya_message(
+                    f"{badge} [bold red]Error al registrar ClaudeAdapter:[/bold red] {err}"
+                )
+                return
+
+            if self.mya_agent.model_id in ("mock-mya", "mock"):
+                self.mya_agent.model_id = "claude-3-5-sonnet-latest"
+                self._save_env_var("MYA_MODEL", "claude-3-5-sonnet-latest")
+                os.environ["MYA_MODEL"] = "claude-3-5-sonnet-latest"
+                self._refresh_ui_model()
+
+            masked = _mask(key_value)
+            self._append_mya_message(
+                f"{badge} [bold green]✓ Clave de Anthropic Claude guardada[/bold green]\n\n"
+                f"  • Clave:         {masked}\n"
+                f"  • Persistencia:  .env\n"
+                f"  • Proveedor:     'anthropic' activo\n"
+                f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
+            )
+
         else:
             self._append_mya_message(
                 f"{badge} [bold red]Proveedor desconocido '{provider}'.[/bold red]\n"
-                f"Proveedores soportados: [bold]openai[/bold], [bold]gemini[/bold]"
+                f"Proveedores soportados: [bold]claude[/bold], [bold]openai[/bold], "
+                "[bold]gemini[/bold]"
             )
 
     def _handle_model_command(self, argument: str) -> None:
@@ -708,6 +752,7 @@ class MyaApp(App[None]):
                 f"  • Modelo activo:            [bold cyan]{curr}[/bold cyan]\n"
                 f"  • Adaptadores registrados:  {', '.join(adapters)}\n\n"
                 f"[dim]Modelos habituales:[/dim]\n"
+                f"  • Claude:  claude-3-5-sonnet-latest, claude-3-5-haiku-latest\n"
                 f"  • OpenAI:  gpt-4o, gpt-4o-mini, o1, o3-mini\n"
                 f"  • Gemini:  gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash\n"
                 f"  • Mock:    mock-mya (simulador local)\n\n"
@@ -716,7 +761,20 @@ class MyaApp(App[None]):
             return
 
         target_model = arg
-        if "gpt" in target_model or "openai" in target_model:
+        if "claude" in target_model or "anthropic" in target_model:
+            if "anthropic" not in self.gateway.adapters:
+                key = os.getenv("ANTHROPIC_API_KEY")
+                if key:
+                    from myagentos.gateway.claude_adapter import ClaudeAdapter
+
+                    self.gateway.register_adapter("anthropic", ClaudeAdapter(api_key=key))
+                else:
+                    self._append_mya_message(
+                        f"{badge} [bold yellow]Advertencia:[/bold yellow] "
+                        "ANTHROPIC_API_KEY no configurada.\n"
+                        f"Configúrala primero con: [bold]/key claude <tu_clave>[/bold]"
+                    )
+        elif "gpt" in target_model or "openai" in target_model:
             if "openai" not in self.gateway.adapters:
                 key = os.getenv("OPENAI_API_KEY")
                 if key:

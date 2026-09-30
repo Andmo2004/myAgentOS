@@ -157,6 +157,7 @@ async def test_mya_app_model_auto_detection(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("MYA_MODEL", raising=False)
 
     app_default = MyaApp()
@@ -168,8 +169,15 @@ async def test_mya_app_model_auto_detection(monkeypatch: pytest.MonkeyPatch) -> 
     app_custom = MyaApp()
     assert app_custom.mya_agent.model_id == "custom-model-id"
 
-    # OpenAI detection
+    # Claude / Anthropic detection
     monkeypatch.delenv("MYA_MODEL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-fake-key")
+    app_claude = MyaApp()
+    assert app_claude.mya_agent.model_id == "claude-3-5-sonnet-latest"
+    assert "anthropic" in app_claude.gateway.adapters
+
+    # OpenAI detection
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake-key")
     app_openai = MyaApp()
     assert app_openai.mya_agent.model_id == "gpt-4o"
@@ -192,6 +200,7 @@ async def test_mya_app_key_and_model_commands(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("MYA_MODEL", raising=False)
 
     app = MyaApp(repo_path=temp_dir)
@@ -232,5 +241,31 @@ async def test_mya_app_key_and_model_commands(
         assert os.environ.get("GEMINI_API_KEY") == "AIzaSy9876543210zyxw"
         env_content_gemini = (temp_dir / ".env").read_text(encoding="utf-8")
         assert "GEMINI_API_KEY=AIzaSy9876543210zyxw" in env_content_gemini
+
+        # 5. Configure Claude key
+        inp.value = "/key claude sk-ant-api03-abcdef1234567890"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "anthropic" in app.gateway.adapters
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-api03-abcdef1234567890"
+        env_content_claude = (temp_dir / ".env").read_text(encoding="utf-8")
+        assert "ANTHROPIC_API_KEY=sk-ant-api03-abcdef1234567890" in env_content_claude
+
+        # 6. Switch model to Claude Sonnet
+        inp.value = "/model claude-3-5-sonnet-latest"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.mya_agent.model_id == "claude-3-5-sonnet-latest"
+        env_content_sonnet = (temp_dir / ".env").read_text(encoding="utf-8")
+        assert "MYA_MODEL=claude-3-5-sonnet-latest" in env_content_sonnet
+
+        # 7. Switch model to Claude Haiku
+        inp.value = "/model claude-3-5-haiku-latest"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.mya_agent.model_id == "claude-3-5-haiku-latest"
+        env_content_haiku = (temp_dir / ".env").read_text(encoding="utf-8")
+        assert "MYA_MODEL=claude-3-5-haiku-latest" in env_content_haiku
+
 
 

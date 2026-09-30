@@ -44,6 +44,8 @@ class ModelGateway:
                 resolved_provider = "openai"
             elif "gemini" in model_id:
                 resolved_provider = "google"
+            elif "claude" in model_id or "anthropic" in model_id:
+                resolved_provider = "anthropic"
             else:
                 resolved_provider = "mock"
 
