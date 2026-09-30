@@ -28,6 +28,8 @@ class PipelineConfig(BaseModel):
     max_steps: int = 12
     approval_callback: Callable[[str, PlanSpec], bool] | None = None
     diff_approval_callback: Callable[[str, PatchSet], bool] | None = None
+    skills_dir: Path | None = None
+    explicit_skills: list[str] = Field(default_factory=list)
 
 
 class PipelineResult(BaseModel):

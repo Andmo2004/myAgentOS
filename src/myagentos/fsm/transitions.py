@@ -43,6 +43,8 @@ class TransitionTable:
                 return JobState.ROUTING
 
         elif current_state == JobState.ROUTING:
+            if event_name == EventName.SKILL_ACTIVATED:
+                return JobState.ROUTING
             if event_name == EventName.ROUTE_SELECTED:
                 intent = payload.get("intent", "PLANNED_CODE")
                 if intent == "DOC_LOOKUP":
@@ -103,6 +105,8 @@ class TransitionTable:
                 return JobState.CANCELLED
 
         elif current_state == JobState.PLAN_CONTEXT:
+            if event_name == EventName.SKILL_ACTIVATED:
+                return JobState.PLAN_CONTEXT
             if event_name == EventName.PLAN_CONTEXT_BUILT:
                 return JobState.PLAN_SPEC
 
@@ -131,6 +135,8 @@ class TransitionTable:
                 return JobState.CANCELLED
 
         elif current_state == JobState.WORKER_CONTEXT:
+            if event_name == EventName.SKILL_ACTIVATED:
+                return JobState.WORKER_CONTEXT
             if event_name == EventName.WORKER_CONTEXT_BUILT:
                 return JobState.WORKTREE_READY
 

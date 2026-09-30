@@ -131,6 +131,7 @@ class CapabilityToken(BaseModel):
                 "limits": min_limits,
                 "risk_level": max(self.risk_level, other.risk_level),
                 "trust": self.trust.combine_with(other.trust),
+                "skills": sorted(list(set(self.skills) | set(other.skills))),
                 "expires_at": min(self.expires_at, other.expires_at),
             }
         )

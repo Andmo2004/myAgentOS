@@ -35,6 +35,7 @@ from myagentos.router.models import RoutingIntent
 from myagentos.router.rules import LocalRouter
 from myagentos.sandbox.base import SandboxDriver
 from myagentos.sandbox.mock import MockSandboxDriver
+from myagentos.skills import SkillPermissionEnforcer, SkillRegistry
 from myagentos.verification.guard import VerificationGuard, VerificationResult
 from myagentos.worker.broker import ToolBroker
 from myagentos.worker.loop import WorkerLoop
@@ -58,6 +59,7 @@ class PipelineOrchestrator:
         independent_reviewer: IndependentReviewer | None = None,
         diff_approval_manager: DiffApprovalManager | None = None,
         curator_agent: CuratorAgent | None = None,
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self.config = config
         self.repo_root = config.repo_root.resolve()
@@ -76,6 +78,11 @@ class PipelineOrchestrator:
             gateway=self.gateway,
             model_id=self.config.curator_model_id or "mock",
         )
+        self.skill_registry = skill_registry or SkillRegistry()
+        if (self.repo_root / "skills").is_dir():
+            self.skill_registry.load_from_directory(self.repo_root / "skills")
+        if self.config.skills_dir and self.config.skills_dir.is_dir():
+            self.skill_registry.load_from_directory(self.config.skills_dir)
 
         self.router = LocalRouter()
         self.context_compiler = ContextCompiler(
@@ -178,13 +185,49 @@ class PipelineOrchestrator:
             )
 
         # 6. Worker Context & Worktree
+        # Discover and match skills Just-in-Time (§20, AUD-027)
+        active_skills = self.skill_registry.match_skills(
+            task_prompt=task_prompt,
+            target_paths=list(plan.all_targeted_paths()),
+            explicit_skills=self.config.explicit_skills,
+        )
+        for skill in active_skills:
+            controller.transition(
+                EventName.SKILL_ACTIVATED,
+                EventActor.SKILL_REGISTRY,
+                payload={
+                    "skill": skill.identifier,
+                    "skill_name": skill.name,
+                    "min_risk": skill.min_risk_level.value,
+                    "content_hash": skill.content_hash,
+                    "instructions": skill.instructions,
+                    "verification": skill.verification.model_dump(),
+                },
+            )
+
+        # Monotonically elevate risk if skills require higher minimum risk (§20, AUD-027)
+        effective_risk = SkillPermissionEnforcer.compute_effective_risk(
+            assessment.level, active_skills
+        )
+        if effective_risk > assessment.level:
+            assessment = assessment.model_copy(update={"level": effective_risk})
+
         token = self.policy_engine.issue_capability_token(
             job_id=job_id,
             worker_id="worker-1",
             plan=plan,
             risk_level=assessment.level,
+            skills=active_skills,
         )
         controller.transition(EventName.WORKER_CONTEXT_BUILT, EventActor.JOB_CONTROLLER)
+
+        # Add any skill-declared protected paths to verification guard (§13.2, §20)
+        if active_skills:
+            self.verification_guard.protected_paths = (
+                SkillPermissionEnforcer.compute_additive_protected_paths(
+                    self.verification_guard.protected_paths, active_skills
+                )
+            )
 
         # Prepare isolated worktree
         worktree_path, is_ephemeral = self._prepare_worktree(job_id, base_commit)
@@ -195,7 +238,10 @@ class PipelineOrchestrator:
                 payload={"requires_test_authoring": False},
             )
 
-            # 7. Execute Worker Loop
+            # 7. Execute Worker Loop with skill instructions in stable prefix (§9.3, §20)
+            skill_prefix = SkillPermissionEnforcer.build_skill_instructions_prefix(active_skills)
+            worker_prompt = f"{skill_prefix}{task_prompt}" if skill_prefix else task_prompt
+
             broker = ToolBroker(
                 worktree_path=worktree_path,
                 token=token,
@@ -209,7 +255,7 @@ class PipelineOrchestrator:
                 model_id=self.config.model_id,
                 event_store=self.event_store,
             )
-            worker_result = loop.run(task_prompt)
+            worker_result = loop.run(worker_prompt)
 
             if not worker_result.success or not worker_result.patch_set:
                 controller.transition(

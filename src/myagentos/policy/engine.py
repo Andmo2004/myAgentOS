@@ -9,13 +9,15 @@ from myagentos.core.models.risk import RiskAssessment, RiskLevel, RiskPhase
 from myagentos.core.models.token import CapabilityToken, NetworkScope, TokenLimits
 from myagentos.policy.signals import DEFAULT_PROTECTED_PATHS, detect_risk_signals
 from myagentos.policy.validator import validate_patch_set
+from myagentos.skills.enforcer import SkillPermissionEnforcer
+from myagentos.skills.models import SkillManifest
 
 
 class PolicyEngine:
     """Security and governance component enforcing least-privilege tokens and monotonic risk."""
 
     def __init__(self, protected_paths: list[str] | None = None) -> None:
-        self.protected_paths = protected_paths or DEFAULT_PROTECTED_PATHS
+        self.protected_paths = list(protected_paths or DEFAULT_PROTECTED_PATHS)
 
     def assess_risk(
         self,
@@ -70,8 +72,9 @@ class PolicyEngine:
         risk_level: RiskLevel,
         ttl_minutes: int = 30,
         skill_tokens: list[CapabilityToken] | None = None,
+        skills: list[SkillManifest] | None = None,
     ) -> CapabilityToken:
-        """Issues an explicit, minimal capability token for a worker (§23).
+        """Issues an explicit, minimal capability token for a worker (§20, §23, AUD-027).
 
         Intersection rule: token = plan_scope ∩ policy ∩ skill_permissions.
         """
@@ -88,21 +91,34 @@ class PolicyEngine:
             RiskLevel.CRITICAL: TokenLimits(max_files=5, max_diff_lines=200, max_steps=10),
         }
 
+        # Monotonically elevate risk if any active skill requires higher minimum risk (§20, AUD-027)
+        effective_risk = (
+            SkillPermissionEnforcer.compute_effective_risk(risk_level, skills)
+            if skills
+            else risk_level
+        )
+
         token = CapabilityToken(
             job_id=job_id,
             worker_id=worker_id,
-            risk_level=risk_level,
+            risk_level=effective_risk,
             read_scope=read_scope,
             write_scope=write_scope,
             execute_scope=exec_scope,
             network_scope=NetworkScope.NONE,
-            limits=limits_map.get(risk_level, TokenLimits()),
+            limits=limits_map.get(effective_risk, TokenLimits()),
             trust=TrustTag.UNTRUSTED,
             base_commit=plan.base_commit,
             expires_at=datetime.now(UTC) + timedelta(minutes=ttl_minutes),
         )
 
-        # Intersect with skills if active (§20 & §23)
+        # Intersect with skills if active (§20, §23, AUD-027)
+        if skills:
+            token = SkillPermissionEnforcer.intersect_token_with_skills(token, skills)
+            self.protected_paths = SkillPermissionEnforcer.compute_additive_protected_paths(
+                self.protected_paths, skills
+            )
+
         if skill_tokens:
             for s_tok in skill_tokens:
                 token = token.intersect_with(s_tok)
