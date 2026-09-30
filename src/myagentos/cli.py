@@ -145,6 +145,7 @@ def cmd_continue(
     root = Path(repo_path).resolve()
     store = ContinuityStore(root)
     project_id = root.name
+    snaps: list[Path] = []
 
     if action == "report":
         pdir = store.base_dir / project_id / "continuity"
@@ -168,14 +169,17 @@ def cmd_continue(
 
     if action == "findings":
         pdir = store.base_dir / project_id / "continuity"
-        snaps = (
-            sorted(
-                [d for d in pdir.iterdir() if d.is_dir()],
-                key=lambda d: d.stat().st_mtime,
-                reverse=True,
+        if not pdir.is_dir():
+            console.print(
+                f"[yellow]No findings found for '{project_id}'."
+                " Run `myagentos continue` first.[/yellow]"
             )
-            if pdir.is_dir()
-            else []
+            return
+
+        snaps = sorted(
+            [d for d in pdir.iterdir() if d.is_dir()],
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
         )
         if not snaps or not (snaps[0] / "findings.json").is_file():
             console.print(
