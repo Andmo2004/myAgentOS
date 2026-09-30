@@ -720,6 +720,48 @@ def cmd_mya(
         console.print(handlers.handle_cloud(argument))
     elif cmd == "/security":
         console.print(handlers.handle_security(argument))
+    elif cmd == "/theme":
+        from myagentos.ui.theme.themes import ThemeRegistry
+
+        reg = ThemeRegistry.get_instance()
+        if not argument:
+            avail = ", ".join(t.name for t in reg.list_themes())
+            console.print(
+                f"[bold]Active Theme:[/bold] {reg.active_theme.name}\nAvailable: {avail}"
+            )
+        else:
+            try:
+                th = reg.set_active_theme(argument)
+                console.print(f"[bold green]✓ Switched theme to '{th.name}'[/bold green]")
+            except ValueError as err:
+                console.print(f"[bold red]Error:[/bold red] {err}")
+    elif cmd == "/motion":
+        from myagentos.ui.visual.motion import MotionController
+
+        ctrl = MotionController.get_instance()
+        if not argument:
+            console.print(f"[bold]Motion Mode:[/bold] {ctrl.mode.value}")
+        else:
+            try:
+                m = ctrl.set_mode(argument)
+                console.print(f"[bold green]✓ Motion mode set to '{m.value}'[/bold green]")
+            except ValueError as err:
+                console.print(f"[bold red]Error:[/bold red] {err}")
+    elif cmd == "/avatar":
+        from myagentos.mya.presentation import MyaRenderState, get_mya_renderer
+
+        valid = ["dot", "glyph", "ascii", "minimal"]
+        if not argument:
+            console.print(f"[bold]Avatar Modes:[/bold] {', '.join(valid)}")
+        elif argument.lower() in valid:
+            rend = get_mya_renderer(argument)
+            rs = MyaRenderState(status="IDLE", label="Ready", avatar_mode=argument)
+            console.print(f"[bold green]✓ Avatar mode '{argument}':[/bold green]\n")
+            console.print(rend.render_avatar(rs))
+        else:
+            console.print(
+                f"[bold red]Error:[/bold red] Unknown mode '{argument}'. Valid: {', '.join(valid)}"
+            )
     else:
         from myagentos.mya.agent import MyaAgent
 

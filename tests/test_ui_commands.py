@@ -97,6 +97,25 @@ class TestParseInput:
         cmd = parse_input("/categorize")
         assert cmd.kind == SlashCommandKind.CATEGORIZE
 
+    def test_visual_presentation_commands(self) -> None:
+        cmd_th = parse_input("/theme minimal")
+        assert cmd_th.kind == SlashCommandKind.THEME
+        assert cmd_th.argument == "minimal"
+
+        cmd_mo = parse_input("/motion reduced")
+        assert cmd_mo.kind == SlashCommandKind.MOTION
+        assert cmd_mo.argument == "reduced"
+
+        cmd_av = parse_input("/avatar ascii")
+        assert cmd_av.kind == SlashCommandKind.AVATAR
+        assert cmd_av.argument == "ascii"
+
+        cmd_cp = parse_input("/compact")
+        assert cmd_cp.kind == SlashCommandKind.COMPACT
+
+        cmd_ds = parse_input("/dense")
+        assert cmd_ds.kind == SlashCommandKind.DENSE
+
 
 class TestAutocomplete:
     """Tests for slash command autocomplete."""

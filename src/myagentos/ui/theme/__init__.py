@@ -1,0 +1,61 @@
+"""UI Theme, symbols, and animation package (§20)."""
+
+from myagentos.ui.theme.animation import (
+    ASCII_PULSE_FRAMES,
+    ASCII_SPINNER_FRAMES,
+    UNICODE_PULSE_FRAMES,
+    UNICODE_SPINNER_FRAMES,
+    MicroAnimation,
+    get_pulse,
+    get_spinner,
+    render_progress_bar,
+)
+from myagentos.ui.theme.symbols import (
+    ASCII_COST_TIER_BADGES,
+    ASCII_FILE_ACTIVITY_BADGES,
+    ASCII_SYMBOLS,
+    COST_TIER_BADGES,
+    FILE_ACTIVITY_BADGES,
+    UNICODE_SYMBOLS,
+    CostTier,
+    FileActivityState,
+    Severity,
+    VisualStatus,
+    get_status_symbol,
+)
+from myagentos.ui.theme.themes import (
+    DEFAULT_THEME,
+    HIGH_CONTRAST_THEME,
+    MINIMAL_THEME,
+    MONOCHROME_THEME,
+    Theme,
+    ThemeRegistry,
+)
+
+__all__ = [
+    "ASCII_COST_TIER_BADGES",
+    "ASCII_FILE_ACTIVITY_BADGES",
+    "ASCII_PULSE_FRAMES",
+    "ASCII_SPINNER_FRAMES",
+    "ASCII_SYMBOLS",
+    "COST_TIER_BADGES",
+    "CostTier",
+    "DEFAULT_THEME",
+    "FILE_ACTIVITY_BADGES",
+    "FileActivityState",
+    "HIGH_CONTRAST_THEME",
+    "MINIMAL_THEME",
+    "MONOCHROME_THEME",
+    "MicroAnimation",
+    "Severity",
+    "Theme",
+    "ThemeRegistry",
+    "UNICODE_PULSE_FRAMES",
+    "UNICODE_SPINNER_FRAMES",
+    "UNICODE_SYMBOLS",
+    "VisualStatus",
+    "get_pulse",
+    "get_spinner",
+    "get_status_symbol",
+    "render_progress_bar",
+]

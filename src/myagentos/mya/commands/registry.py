@@ -103,6 +103,47 @@ _BUILTIN_COMMANDS: list[CommandDefinition] = [
         supports_arguments=True,
         routing_hint="SECURITY",
     ),
+    # Visual & Character presentation commands (§24)
+    CommandDefinition(
+        name="theme",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Cambia o consulta el tema visual de la interfaz terminal",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=True,
+    ),
+    CommandDefinition(
+        name="motion",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Configura el nivel de animación (full, reduced, off)",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=True,
+    ),
+    CommandDefinition(
+        name="avatar",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Selecciona la representación visual de Mya (dot, glyph, ascii, minimal)",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=True,
+    ),
+    CommandDefinition(
+        name="compact",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Ajusta la densidad visual a modo compacto",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=False,
+    ),
+    CommandDefinition(
+        name="dense",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Ajusta la densidad visual a modo cómodo",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=False,
+    ),
 ]
 
 

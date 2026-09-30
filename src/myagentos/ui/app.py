@@ -23,6 +23,7 @@ from myagentos.mya.commands import (
     ObservabilityService,
     format_command_badge,
 )
+from myagentos.mya.presentation import MyaRenderState, get_mya_renderer
 from myagentos.ui.commands import (
     ParsedCommand,
     SlashCommandKind,
@@ -30,7 +31,9 @@ from myagentos.ui.commands import (
 )
 from myagentos.ui.screens.projects import ProjectsScreen
 from myagentos.ui.session import Session, create_session
+from myagentos.ui.theme.themes import ThemeRegistry
 from myagentos.ui.themes import Colors, Icons
+from myagentos.ui.visual.motion import MotionController
 
 HELP_TEXT = """\
 [bold cyan]Talk naturally:[/bold cyan]
@@ -55,6 +58,12 @@ HELP_TEXT = """\
   /decision <question>   5 independent perspectives 🟠
   /cloud <prompt>        cloud architecture & IAM 🟡
   /security <prompt>     cybersecurity & OWASP audit 🟡
+
+[bold cyan]Visual & Character (Presentation):[/bold cyan]
+  /theme [name]          switch theme (default, minimal, high_contrast, monochrome)
+  /motion [mode]         animation mode (full, reduced, off)
+  /avatar [mode]         mya avatar style (dot, glyph, ascii, minimal)
+  /compact, /dense       toggle display density
 """
 
 
@@ -331,6 +340,93 @@ class MyaApp(App[None]):
                 handler = CommandHandlerService()
                 res = handler.handle_security(cmd.argument)
                 self._append_mya_message(res)
+
+            case SlashCommandKind.THEME:
+                registry = ThemeRegistry.get_instance()
+                arg = cmd.argument.strip().lower()
+                badge = format_command_badge("/theme")
+                if not arg:
+                    avail = ", ".join(t.name for t in registry.list_themes())
+                    curr = registry.active_theme.name
+                    self._append_mya_message(
+                        f"{badge} [bold]THEME SETTINGS[/bold]\n"
+                        f"  Active theme: [bold green]{curr}[/bold green]\n"
+                        f"  Available:    {avail}\n\n"
+                        "[dim]Uso: /theme <nombre_del_tema>[/dim]"
+                    )
+                else:
+                    try:
+                        th = registry.set_active_theme(arg)
+                        self._append_mya_message(
+                            f"{badge} [bold]Tema cambiado a '{th.name}'[/bold]\n"
+                            f"  {th.description}\n"
+                            f"  [dim]Densidad: {th.density} | ASCII only: {th.ascii_only}[/dim]"
+                        )
+                    except ValueError as err:
+                        self._append_mya_message(f"[bold red]Error:[/bold red] {err}")
+
+            case SlashCommandKind.MOTION:
+                ctrl = MotionController.get_instance()
+                arg = cmd.argument.strip().lower()
+                badge = format_command_badge("/motion")
+                if not arg:
+                    self._append_mya_message(
+                        f"{badge} [bold]MOTION MODE[/bold]\n"
+                        f"  Current: [bold green]{ctrl.mode.value}[/bold green]\n"
+                        "  Modes:   full (spinners/transitions), "
+                        "reduced (transitions only), off (no animation)\n\n"
+                        "[dim]Uso: /motion full|reduced|off[/dim]"
+                    )
+                else:
+                    try:
+                        mode = ctrl.set_mode(arg)
+                        self._append_mya_message(
+                            f"{badge} [bold]Nivel de animación: '{mode.value}'[/bold]"
+                        )
+                    except ValueError as err:
+                        self._append_mya_message(f"[bold red]Error:[/bold red] {err}")
+
+            case SlashCommandKind.AVATAR:
+                arg = cmd.argument.strip().lower()
+                valid_modes = ["dot", "glyph", "ascii", "minimal"]
+                badge = format_command_badge("/avatar")
+                if not arg:
+                    curr = getattr(self, "_avatar_mode", "dot")
+                    self._append_mya_message(
+                        f"{badge} [bold]MYA AVATAR MODE[/bold]\n"
+                        f"  Current: [bold green]{curr}[/bold green]\n"
+                        f"  Modes:   {', '.join(valid_modes)}\n\n"
+                        "[dim]Uso: /avatar dot|glyph|ascii|minimal[/dim]"
+                    )
+                elif arg not in valid_modes:
+                    self._append_mya_message(
+                        f"[bold red]Error:[/bold red] Avatar mode '{arg}' desconocido. "
+                        f"Elija de: {', '.join(valid_modes)}"
+                    )
+                else:
+                    self._avatar_mode = arg
+                    renderer = get_mya_renderer(arg)
+                    rs = MyaRenderState(
+                        status="IDLE", label="Ready", expression="calm", avatar_mode=arg
+                    )
+                    theme = ThemeRegistry.get_instance().active_theme
+                    preview = renderer.render_avatar(rs, ascii_only=theme.ascii_only)
+                    self._append_mya_message(
+                        f"{badge} [bold]Avatar de Mya cambiado a '{arg}':[/bold]\n\n"
+                        f"{preview}"
+                    )
+
+            case SlashCommandKind.COMPACT:
+                badge = format_command_badge("/compact")
+                self._append_mya_message(
+                    f"{badge} Densidad visual cambiada a [bold green]compacto[/bold green]."
+                )
+
+            case SlashCommandKind.DENSE:
+                badge = format_command_badge("/dense")
+                self._append_mya_message(
+                    f"{badge} Densidad visual cambiada a [bold green]cómodo[/bold green]."
+                )
 
             case SlashCommandKind.NATURAL | SlashCommandKind.MYA:
                 prompt = cmd.argument if cmd.kind == SlashCommandKind.MYA else cmd.raw_input

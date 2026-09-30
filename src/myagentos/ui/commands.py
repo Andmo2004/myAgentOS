@@ -48,6 +48,13 @@ class SlashCommandKind(StrEnum):
     CLOUD = "cloud"
     SECURITY = "security"
 
+    # Visual & Character commands (§24)
+    THEME = "theme"
+    MOTION = "motion"
+    AVATAR = "avatar"
+    COMPACT = "compact"
+    DENSE = "dense"
+
     # Mya commands (passed to Mya agent)
     MYA = "mya"
 
@@ -99,6 +106,12 @@ _SLASH_MAP: dict[str, SlashCommandKind] = {
     "/decision": SlashCommandKind.DECISION,
     "/cloud": SlashCommandKind.CLOUD,
     "/security": SlashCommandKind.SECURITY,
+    # Visual & Character Commands
+    "/theme": SlashCommandKind.THEME,
+    "/motion": SlashCommandKind.MOTION,
+    "/avatar": SlashCommandKind.AVATAR,
+    "/compact": SlashCommandKind.COMPACT,
+    "/dense": SlashCommandKind.DENSE,
     "/mya": SlashCommandKind.MYA,
 }
 

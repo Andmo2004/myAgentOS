@@ -6,8 +6,8 @@ from myagentos.mya.commands.models import (
 from myagentos.mya.commands.registry import COMMAND_REGISTRY
 
 
-def test_command_registry_contains_all_10_commands():
-    expected_commands = {
+def test_command_registry_contains_all_commands():
+    core_10_commands = {
         "info",
         "telemetry",
         "monitor",
@@ -20,9 +20,9 @@ def test_command_registry_contains_all_10_commands():
         "security",
     }
     all_cmds = COMMAND_REGISTRY.list_all()
-    assert len(all_cmds) == 10
     names = {c.name for c in all_cmds}
-    assert names == expected_commands
+    assert core_10_commands.issubset(names)
+    assert {"theme", "motion", "avatar", "compact", "dense"}.issubset(names)
 
 
 def test_command_lookup_with_or_without_slash():
