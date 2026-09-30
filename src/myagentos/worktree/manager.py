@@ -93,3 +93,80 @@ class WorktreeManager:
         # Ensure directory is removed
         if worktree_path.exists():
             shutil.rmtree(worktree_path, ignore_errors=True)
+
+    def get_head_commit(self, repo_dir: Path | None = None) -> str:
+        """Returns current HEAD commit hash of the repository (§8.4)."""
+        target = repo_dir or self.repo_root
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(target),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            return "local-head"
+        return res.stdout.strip()
+
+    def get_changed_files_between(
+        self,
+        commit_a: str,
+        commit_b: str,
+        repo_dir: Path | None = None,
+    ) -> list[str]:
+        """Returns the list of relative file paths changed between commit_a and commit_b (§8.4)."""
+        target = repo_dir or self.repo_root
+        res = subprocess.run(
+            ["git", "diff", "--name-only", commit_a, commit_b],
+            cwd=str(target),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if res.returncode != 0:
+            return []
+        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+
+    def rebase_branch(self, worktree_path: Path, new_base: str) -> bool:
+        """Rebases the branch in worktree_path onto new_base commit (§8.4).
+
+        Returns True if rebase succeeds, False if conflicts occur.
+        """
+        if not worktree_path.is_dir() or not (worktree_path / ".git").exists():
+            return True
+
+        # Check for uncommitted working tree modifications
+        status_res = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if status_res.returncode == 0 and status_res.stdout.strip():
+            # Commit dirty files so git rebase can replay the commit
+            subprocess.run(["git", "add", "-A"], cwd=str(worktree_path), check=False)
+            subprocess.run(
+                ["git", "commit", "-m", "WIP: agentic changes before rebase"],
+                cwd=str(worktree_path),
+                capture_output=True,
+                check=False,
+            )
+
+        rebase_res = subprocess.run(
+            ["git", "rebase", new_base],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if rebase_res.returncode != 0:
+            subprocess.run(
+                ["git", "rebase", "--abort"],
+                cwd=str(worktree_path),
+                capture_output=True,
+                check=False,
+            )
+            return False
+
+        return True

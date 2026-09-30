@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from myagentos.context.closure import DependencyClosureAnalyzer
 from myagentos.context.compiler import ContextCompiler
 from myagentos.core.models.event import EventActor, EventName
 from myagentos.core.models.failure import FailureCode, ObservedFailure
@@ -444,7 +445,135 @@ class PipelineOrchestrator:
                     approved_by="policy",
                 )
 
-            # 11. Merge Check & Merge
+            # 11. Merge Check & Merge (§8.4, §16, AUD-025, AUD-026)
+            current_head = self._get_base_commit()
+            if (
+                current_head != "local-head"
+                and plan.base_commit != "local-head"
+                and current_head != plan.base_commit
+            ):
+                changed_between = self.worktree_manager.get_changed_files_between(
+                    plan.base_commit, current_head
+                )
+                plan_scope = set(plan.all_targeted_paths())
+                closure_files = set(
+                    DependencyClosureAnalyzer.compute_dependency_closure(
+                        seed_files=list(plan_scope),
+                        root_dir=self.repo_root,
+                    )
+                )
+
+                safe_to_rebase = controller.check_obsolescence(
+                    approved_base_commit=plan.base_commit,
+                    current_commit=current_head,
+                    changed_files_between_commits=changed_between,
+                    plan_scope_files=plan_scope,
+                    protected_paths=self.verification_guard.protected_paths,
+                    dependency_closure=closure_files,
+                )
+
+                if not safe_to_rebase:
+                    conflicts = controller.get_obsolescence_conflicts(
+                        approved_base_commit=plan.base_commit,
+                        current_commit=current_head,
+                        changed_files_between_commits=changed_between,
+                        plan_scope_files=plan_scope,
+                        protected_paths=self.verification_guard.protected_paths,
+                        dependency_closure=closure_files,
+                    )
+                    controller.transition(
+                        EventName.STALE_PLAN,
+                        EventActor.JOB_CONTROLLER,
+                        payload={
+                            "base_commit": plan.base_commit,
+                            "current_commit": current_head,
+                            "conflicts": conflicts,
+                            "changed_files": changed_between,
+                        },
+                    )
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        patch_set=patch_set,
+                        verification=verification_res,
+                        review=review_res,
+                        summary=(
+                            "Plan is stale (§8.4, AUD-025): repository changed in "
+                            f"{', '.join(conflicts)}. Replan required."
+                        ),
+                        duration_seconds=time.monotonic() - t0,
+                    )
+
+                # Safe to rebase: perform automatic rebase onto current_head
+                rebase_ok = self.worktree_manager.rebase_branch(worktree_path, current_head)
+                if not rebase_ok:
+                    controller.transition(
+                        EventName.MERGE_CONFLICT,
+                        EventActor.MERGE_CONTROLLER,
+                        payload={"current_commit": current_head},
+                    )
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        patch_set=patch_set,
+                        verification=verification_res,
+                        review=review_res,
+                        summary="Merge conflict during automatic rebase onto current HEAD.",
+                        duration_seconds=time.monotonic() - t0,
+                    )
+
+                controller.transition(
+                    EventName.BASE_REBASED,
+                    EventActor.JOB_CONTROLLER,
+                    payload={"old_base": plan.base_commit, "new_base": current_head},
+                )
+
+                # Re-run complete verification on rebased code (§8.4)
+                verification_res = self.verification_guard.verify(
+                    worktree_path=worktree_path,
+                    base_commit=current_head,
+                )
+                if not verification_res.passed:
+                    controller.transition(
+                        EventName.TEST_FAILED,
+                        EventActor.VERIFICATION_GUARD,
+                        payload={"diagnostics": verification_res.diagnostics},
+                    )
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        patch_set=patch_set,
+                        verification=verification_res,
+                        review=review_res,
+                        summary=f"Verification failed after rebase: {verification_res.diagnostics}",
+                        duration_seconds=time.monotonic() - t0,
+                    )
+
+                controller.transition(
+                    EventName.VERIFICATION_COMPLETED,
+                    EventActor.VERIFICATION_GUARD,
+                )
+                rev_state, _ = controller.transition(
+                    EventName.REVIEW_COMPLETED,
+                    EventActor.INDEPENDENT_REVIEWER,
+                    payload={"risk_level": assessment.level.value},
+                )
+                if rev_state == JobState.WAIT_DIFF_APPROVAL:
+                    controller.transition(
+                        EventName.APPROVAL_GRANTED,
+                        EventActor.USER,
+                        payload={"reason": "approval remains valid after safe rebase (§8.4)"},
+                    )
+
             # Apply sealed patch set to repository root
             apply_patch_set(self.repo_root, patch_set, verify_before_hash=False)
 
