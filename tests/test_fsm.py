@@ -280,3 +280,44 @@ def test_job_controller_continuation_flow(tmp_path: Path) -> None:
     )
     assert state == JobState.COMPLETE
     assert state.is_terminal is True
+
+
+def test_job_controller_execute_failure(tmp_path: Path) -> None:
+    store = EventStore(root_dir=tmp_path)
+    controller = JobController.create(job_id="job-fsm-fail", event_store=store)
+
+    controller.transition(EventName.TASK_CREATED, EventActor.JOB_CONTROLLER)
+    controller.transition(
+        EventName.ROUTE_SELECTED,
+        EventActor.ROUTER,
+        payload={"intent": "PLANNED_CODE"},
+    )
+    controller.transition(EventName.DATA_CLASSIFIED, EventActor.POLICY_ENGINE)
+    controller.transition(EventName.PLAN_CONTEXT_BUILT, EventActor.JOB_CONTROLLER)
+    controller.transition(
+        EventName.PLAN_GENERATED,
+        EventActor.PLANNER,
+        payload={"plan_id": "p-fail", "base_commit": "c-1"},
+    )
+    controller.transition(
+        EventName.RISK_ASSESSED,
+        EventActor.POLICY_ENGINE,
+        payload={"level": "LOW"},
+    )
+    controller.transition(EventName.WORKER_CONTEXT_BUILT, EventActor.JOB_CONTROLLER)
+    controller.transition(
+        EventName.WORKTREE_READY,
+        EventActor.JOB_CONTROLLER,
+        payload={"requires_test_authoring": False},
+    )
+    assert controller.current_state == JobState.EXECUTE
+
+    state, _ = controller.transition(
+        EventName.JOB_FAILED,
+        EventActor.WORKER,
+        payload={"reason": "MAX_STEPS_EXCEEDED"},
+    )
+    assert state == JobState.CANCELLED
+    assert state.is_terminal is True
+
+

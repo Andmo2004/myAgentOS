@@ -147,6 +147,8 @@ class TransitionTable:
         elif current_state == JobState.EXECUTE:
             if event_name == EventName.PATCH_CREATED:
                 return JobState.POLICY_VALIDATION
+            if event_name == EventName.JOB_FAILED:
+                return JobState.CANCELLED
 
         elif current_state == JobState.POLICY_VALIDATION:
             if event_name == EventName.POLICY_CHECKED:
