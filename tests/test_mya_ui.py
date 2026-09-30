@@ -144,3 +144,37 @@ async def test_mya_app_slash_clear() -> None:
 
         assert pilot.app.query_one("#welcome") is not None
         assert len(list(conversation.children)) == 1
+
+
+@pytest.mark.asyncio
+async def test_mya_app_model_auto_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify model autodetection based on environment variables and .env."""
+    # Default without keys
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("MYA_MODEL", raising=False)
+
+    app_default = MyaApp()
+    assert app_default.mya_agent.model_id == "mock-mya"
+    assert "mock" in app_default.gateway.adapters
+
+    # Explicit MYA_MODEL override
+    monkeypatch.setenv("MYA_MODEL", "custom-model-id")
+    app_custom = MyaApp()
+    assert app_custom.mya_agent.model_id == "custom-model-id"
+
+    # OpenAI detection
+    monkeypatch.delenv("MYA_MODEL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake-key")
+    app_openai = MyaApp()
+    assert app_openai.mya_agent.model_id == "gpt-4o"
+    assert "openai" in app_openai.gateway.adapters
+
+    # Gemini detection
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key")
+    app_gemini = MyaApp()
+    assert app_gemini.mya_agent.model_id == "gemini-2.0-flash"
+    assert "google" in app_gemini.gateway.adapters
+

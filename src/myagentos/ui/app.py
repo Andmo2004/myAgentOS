@@ -7,6 +7,7 @@ The UI contains no security logic and sends commands to the Job Controller.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -70,8 +71,11 @@ HELP_TEXT = """\
 class WelcomePanel(Static):
     """Welcome panel showing repository information (§5)."""
 
-    def __init__(self, session: Session, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, session: Session, model_id: str = "mock-mya", *args: Any, **kwargs: Any
+    ) -> None:
         self.session = session
+        self.model_id = model_id
         super().__init__(*args, **kwargs)
 
     def render(self) -> str:
@@ -86,6 +90,7 @@ class WelcomePanel(Static):
         branch_line = f"  Branch       [{Colors.PRIMARY}]{s.branch or 'N/A'}[/{Colors.PRIMARY}]"
         commit_line = f"  Commit       [{Colors.DIM}]{s.commit_short or 'N/A'}[/{Colors.DIM}]"
         status_line = f"  Status       {status}"
+        model_line = f"  Model        [{Colors.DIM}]{self.model_id}[/{Colors.DIM}]"
 
         lines = [
             "",
@@ -95,6 +100,7 @@ class WelcomePanel(Static):
             branch_line,
             commit_line,
             status_line,
+            model_line,
         ]
 
         if s.project_profile and s.project_profile.visible_tags:
@@ -199,27 +205,102 @@ class MyaApp(App[None]):
         Binding("escape", "escape", "Escape", show=False),
     ]
 
+    @staticmethod
+    def _load_env(repo_path: Path | None = None) -> None:
+        """Loads key=value pairs from .env into os.environ if not already set."""
+        search_paths: list[Path] = []
+        if repo_path:
+            search_paths.append(repo_path / ".env")
+        search_paths.extend([Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env"])
+        for env_path in search_paths:
+            if env_path.is_file():
+                try:
+                    with env_path.open("r", encoding="utf-8") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith("#") or "=" not in line:
+                                continue
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip("'\"")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+                except Exception:
+                    pass
+                break
+
+    @staticmethod
+    def _create_default_gateway(
+        requested_model: str | None = None,
+    ) -> tuple[ModelGateway, str]:
+        """Create ModelGateway with available provider adapters and determine active model."""
+        gateway = ModelGateway()
+        from myagentos.gateway.mock_adapter import MockProviderAdapter
+
+        gateway.register_adapter("mock", MockProviderAdapter())
+
+        has_openai = bool(os.getenv("OPENAI_API_KEY"))
+        has_gemini = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+
+        if has_openai:
+            try:
+                from myagentos.gateway.openai_adapter import OpenAIAdapter
+
+                gateway.register_adapter("openai", OpenAIAdapter())
+            except Exception:
+                pass
+
+        if has_gemini:
+            try:
+                from myagentos.gateway.gemini_adapter import GeminiAdapter
+
+                gateway.register_adapter("google", GeminiAdapter())
+            except Exception:
+                pass
+
+        default_model = "mock-mya"
+        if requested_model:
+            default_model = requested_model
+        elif has_openai:
+            default_model = "gpt-4o"
+        elif has_gemini:
+            default_model = "gemini-2.0-flash"
+
+        return gateway, default_model
+
     def __init__(
         self,
         repo_path: Path | None = None,
         gateway: ModelGateway | None = None,
-        model_id: str = "mock-mya",
+        model_id: str | None = None,
     ) -> None:
         super().__init__()
         self.session = create_session(repo_path)
-        self.gateway = gateway or ModelGateway()
+        self._load_env(repo_path)
+
+        resolved_model = model_id or os.getenv("MYA_MODEL")
+        if gateway is not None:
+            self.gateway = gateway
+            actual_model = resolved_model or "mock-mya"
+        else:
+            self.gateway, default_model = self._create_default_gateway(resolved_model)
+            actual_model = resolved_model or default_model
+
         if "mock" not in self.gateway.adapters:
             from myagentos.gateway.mock_adapter import MockProviderAdapter
 
             self.gateway.register_adapter("mock", MockProviderAdapter())
-        self.mya_agent = MyaAgent(gateway=self.gateway, model_id=model_id)
+
+        self.mya_agent = MyaAgent(gateway=self.gateway, model_id=actual_model)
         self._history: list[str] = []
         self._history_index: int = -1
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         with VerticalScroll(id="conversation", can_focus=False):
-            yield WelcomePanel(self.session, id="welcome")
+            yield WelcomePanel(
+                self.session, model_id=self.mya_agent.model_id, id="welcome"
+            )
         with Vertical(id="bottom-dock"):
             yield Static(self._render_status_bar(), id="status-bar")
             with Horizontal(id="prompt-container"):
@@ -596,6 +677,8 @@ class MyaApp(App[None]):
             f"[{Colors.DIM}]{s.repository or 'no project'}[/{Colors.DIM}]",
             f"[{Colors.DIM}]{s.branch or ''}[/{Colors.DIM}]",
         ]
+        if hasattr(self, "mya_agent") and self.mya_agent and self.mya_agent.model_id:
+            parts.append(f"[{Colors.DIM}]model: {self.mya_agent.model_id}[/{Colors.DIM}]")
         if s.current_job_id:
             parts.append(f"job: {s.current_job_id}")
         return "  │  ".join(parts)
