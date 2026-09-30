@@ -1,4 +1,4 @@
-# myagentos (Agentic OS v2.2+)
+# MYA (myAgenticOS v2.2+)
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Type Checked with Mypy Strict](https://img.shields.io/badge/mypy-strict%20checked-green.svg)](http://mypy-lang.org/)
