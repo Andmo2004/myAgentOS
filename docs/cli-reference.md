@@ -25,7 +25,10 @@ myagentos <comando> [opciones]
 
 | Comando | Descripción |
 |---|---|
+| `mya` | Lanza la terminal interactiva conversacional o ejecuta comandos directos de Mya. |
 | `run` | Ejecuta una tarea autónoma a través del pipeline gobernado completo (§8). |
+| `project` | Administra el ciclo de vida de proyectos (añadir, clonar, papelera, tags) y explorer. |
+| `categorize` | Escanea el repositorio y categoriza su stack tecnológico jerárquicamente. |
 | `route` | Evalúa un prompt localmente e informa sobre la intención y el riesgo preliminar (§6). |
 | `status` | Consulta el estado proyectado de un trabajo y sus metadatos en la FSM. |
 | `verify` | Comprueba matemáticamente la integridad de la cadena de hashes SHA-256 de un trabajo. |
@@ -170,17 +173,176 @@ myagentos continue [action] [opciones]
 
 ---
 
-## 4. Directorios de Datos y Persistencia Local
+### 3.7 `myagentos mya` (y ejecutable `./mya`)
 
-Por especificación de diseño, todos los datos generados por myAgentOS se conservan de forma local y auditable dentro del propio repositorio:
+Inicia la terminal interactiva conversacional (TUI) o ejecuta comandos aislados directamente en consola (§24).
+
+```bash
+myagentos mya [command] [argument] [--repo <path>]
+```
+
+#### Modos de Operación
+
+1. **Modo Interactivo (sin argumentos):**
+   ```bash
+   uv run myagentos mya
+   # o bien:
+   ./mya
+   ```
+   Abre la aplicación Textual a pantalla completa con navegación por teclado, historial, estado de git, explorador de proyectos y soporte para slash commands.
+
+2. **Modo Directo CLI (con comando):**
+   ```bash
+   # Observabilidad sin tokens
+   uv run myagentos mya /info
+   uv run myagentos mya /telemetry
+   uv run myagentos mya /monitor
+
+   # Modos de trabajo y análisis
+   uv run myagentos mya /fast "añade docstrings en src/router.py"
+   uv run myagentos mya /sci_mode "evalúa algoritmos de compresión"
+   uv run myagentos mya /deep_research "mejores prácticas de OAuth2"
+   uv run myagentos mya /optimize "src/db/queries.py"
+   uv run myagentos mya /decision "¿usar dataclasses o pydantic?"
+   uv run myagentos mya /cloud "revisa políticas IAM del bucket S3"
+   uv run myagentos mya /security "audita validación de tokens"
+
+   # Personalización de presentación
+   uv run myagentos mya /theme minimal
+   uv run myagentos mya /motion reduced
+   uv run myagentos mya /avatar ascii
+   ```
+
+---
+
+### 3.8 `myagentos project`
+
+Administra el registro centralizado de proyectos (`~/.myagentos/projects.json`) y sus ciclos de vida.
+
+```bash
+myagentos project [action] [target] [secondary] [opciones]
+```
+
+#### Acciones
+
+| Acción | Argumentos | Descripción |
+|---|---|---|
+| `list` | (ninguno) | Lista todos los proyectos activos registrados. |
+| `add` | `<path>` | Registra un proyecto local existente (con escaneo automático de perfil). |
+| `new` | `<name>` | Inicializa un nuevo proyecto git y lo registra. |
+| `clone` | `<git_url>` `[dest_path]` | Clona un repositorio remoto y lo registra. |
+| `tags` | `<project_id>` | Muestra la tabla de tags y tecnologías detectadas. |
+| `profile` | `<project_id>` | Inspecciona el perfil tecnológico completo. |
+| `categorize` | `<project_id>` | Ejecuta la re-categorización del proyecto. |
+| `trash` | `list` / `move` / `restore` / `purge` | Gestión de la papelera de proyectos. |
+
+#### Ejemplos
+
+```bash
+# Listar proyectos registrados
+uv run myagentos project list
+
+# Registrar el repositorio actual
+uv run myagentos project add . --name "Mi Repositorio"
+
+# Clonar un repositorio remoto
+uv run myagentos project clone https://github.com/usuario/repo.git
+
+# Enviar proyecto a la papelera
+uv run myagentos project trash move proj-123456
+
+# Purgar proyecto definitivamente (sin borrar archivos en disco)
+uv run myagentos project trash purge proj-123456 --confirm
+```
+
+---
+
+### 3.9 `myagentos categorize`
+
+Escanea el árbol del repositorio y construye el perfil tecnológico jerárquico (`.myagentos/project_profile.json`).
+
+```bash
+myagentos categorize [--repo <path>] [--force] [--json]
+```
+
+#### Opciones
+
+- **`--repo <path>`**: Directorio raíz del repositorio a categorizar (por defecto: `.`).
+- **`--force`**: Fuerza el re-análisis ignorando la caché existente.
+- **`--json`**: Emite el perfil estructurado en formato JSON estándar.
+
+---
+
+## 4. Referencia de Slash Commands en la Terminal Interactiva (TUI)
+
+Dentro de la terminal de Mya (`mya`), los comandos se introducen con prefijo `/` y se colorean automáticamente con insignias según su familia:
+
+### 4.1 Observabilidad (`UI_OBSERVABILITY` · Fondo Azul)
+
+| Comando | Coste | Descripción |
+|---|---|---|
+| `/info` | 🟢 LOW | Muestra estado de sesión, presupuesto de tokens consumidos y gasto acumulado USD. |
+| `/telemetry` | 🟢 LOW | Muestra desglose de llamadas, tokens in/out y actividad por agente. |
+| `/monitor` | 🟢 LOW | Despliega el monitor en vivo con árbol de agentes, archivos afectados y comprobaciones. |
+| `/status` | 🟢 LOW | Consulta el estado del repositorio Git y rama actual. |
+| `/projects` | 🟢 LOW | Abre el explorador interactivo de proyectos (atajo `Ctrl+P`). |
+| `/help` | 🟢 LOW | Muestra la guía de ayuda interactiva y lista de comandos. |
+
+### 4.2 Modos de Trabajo (`WORKING_MODE` · Fondo Verde Esmeralda)
+
+| Comando | Coste | Descripción |
+|---|---|---|
+| `/fast <prompt>` | 🟢 LOW | Ruta rápida con mínima sobrecarga conversacional; escala preventivamente si detecta riesgo. |
+| `/sci_mode <prompt>` | 🟡 MEDIUM | Análisis técnico estructurado (Pregunta → Hipótesis → Evidencia → Resultados → Conclusión). |
+
+### 4.3 Investigación y Análisis (`RESEARCH_ANALYSIS` · Fondo Púrpura)
+
+| Comando | Coste | Descripción |
+|---|---|---|
+| `/deep_research <query>` | 🔴 VERY HIGH | Investigación exhaustiva técnica y documental (**nunca modifica código por defecto**). |
+| `/optimize <target>` | 🟡 MEDIUM | Detección de cuellos de botella y propuestas de optimización sin alteración automática. |
+| `/categorize` | 🟢 LOW | Re-escanea el perfil tecnológico y tags del repositorio activo. |
+
+### 4.4 Decisión y Especialización (`DECISION_EXPERTISE` · Fondo Ámbar/Naranja)
+
+| Comando | Coste | Descripción |
+|---|---|---|
+| `/decision <question>` | 🟠 HIGH | Mapea 5 perspectivas independientes (Architect, Performance, Security, Maintainability, Cost). |
+| `/cloud <prompt>` | 🟡 MEDIUM | Especialización en infraestructura cloud, IAM y recursos distribuidos. |
+| `/security <prompt>` | 🟡 MEDIUM | Auditoría especializada de ciberseguridad y controles OWASP (solo puede elevar riesgo). |
+
+### 4.5 Presentación y Personalización Visual
+
+| Comando | Coste | Descripción |
+|---|---|---|
+| `/theme [nombre]` | 🟢 LOW | Cambia o consulta el tema visual (`default`, `minimal`, `high_contrast`, `monochrome`). |
+| `/motion [modo]` | 🟢 LOW | Configura el nivel de animación (`full`, `reduced`, `off`). |
+| `/avatar [modo]` | 🟢 LOW | Conmuta la representación de Mya (`dot`, `glyph`, `ascii`, `minimal`). |
+| `/compact`, `/dense` | 🟢 LOW | Alterna la densidad de información en pantalla. |
+
+---
+
+## 5. Directorios de Datos y Persistencia Local
+
+myAgentOS utiliza dos niveles de persistencia claramente segregados:
+
+### A. Registro Global de Usuario (`~/.myagentos/`)
+
+```text
+~/.myagentos/
+└── projects.json                # Registro global de repositorios, metadatos y papelera
+```
+
+### B. Datos del Repositorio Local (`.myagentos/`)
 
 ```text
 .myagentos/
+├── project_profile.json         # Perfil tecnológico y tags de categorización cacheados
 ├── jobs/
 │   └── {job_id}/
-│       └── events.jsonl         # Registro append-only con cadena SHA-256
+│       └── events.jsonl         # Registro append-only con cadena criptográfica SHA-256
 ├── worktrees/
-│   └── {job_id}/                # Worktrees git temporales y aislados
+│   └── {job_id}/                # Worktrees git temporales y aislados para workers
 ├── vault/
 │   └── projects/{project_id}/
 │       ├── _inbox/              # Notas de arquitectura en staging (Curator)

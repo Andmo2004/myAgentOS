@@ -1,9 +1,9 @@
-# myagentos (Agentic OS v2.1)
+# myagentos (Agentic OS v2.2+)
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Type Checked with Mypy Strict](https://img.shields.io/badge/mypy-strict%20checked-green.svg)](http://mypy-lang.org/)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
-[![Tests: Pytest](https://img.shields.io/badge/tests-133%20passed-brightgreen.svg)](https://docs.pytest.org/)
+[![Tests: Pytest](https://img.shields.io/badge/tests-273%20passed-brightgreen.svg)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
 **myagentos** es una implementación canónica y de grado de producción de un **Sistema Operativo Agéntico para Ingeniería de Software**, gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/specification.md`](docs/specification.md).
@@ -138,6 +138,34 @@ flowchart TD
 - **Dataset Estratificado:** Casos de prueba en 5 categorías: `LOW_MECHANICAL`, `FEATURE_MEDIUM`, `HIGH_AUTH_CRITICAL`, `ADVERSARIAL_SECURITY` y `PCA_CONTINUITY`.
 - **Telemetría Completa:** Medición de latencia (p50/p95), tokens, coste estimado USD, tasas de defensa de políticas y preservación de integridad de la cadena criptográfica.
 
+### 13. Mya: Interfaz Conversacional y Agente de Intención (`src/myagentos/mya/`)
+- **Voz del Sistema Operativo:** Capa de diálogo inteligente que traduce lenguaje natural del usuario a `UserIntent` tipado, formula preguntas de aclaración cuando la tarea es ambigua y comenta la ejecución.
+- **Invariante de Separación de Autoridad:** Mya nunca altera directamente la FSM, no emite Capability Tokens ni reduce unilateralmente el riesgo.
+
+### 14. Categorización de Proyectos y Perfil Tecnológico (`src/myagentos/projects/`)
+- **Taxonomía Jerárquica Multi-Label:** Detección de lenguajes, frameworks, tipos de aplicación y controles de calidad con puntuación de confianza y fuentes (`DETERMINISTIC`, `INFERRED`, `USER_PINNED`).
+- **Caché y Validación de Cambios:** Persistencia en `.myagentos/project_profile.json` con hash de repositorio y detección automática de obsolescencia.
+
+### 15. Project Manager y Project Explorer TUI (`src/myagentos/projects/`, `src/myagentos/ui/screens/projects.py`)
+- **Registro Centralizado Multi-Proyecto:** Almacenamiento en `~/.myagentos/projects.json` con gestión de estado (`ACTIVE`, `TRASHED`, `ARCHIVED`).
+- **Operaciones de Ciclo de Vida:** Añadir proyecto existente, crear nuevo desde plantilla, clonar repositorio Git remoto y papelera con recuperación o purga permanente.
+- **Pantalla Interactiva `ProjectsScreen` (Ctrl+P):** Tabla de proyectos navegable, filtrado por tags o texto libre, acciones rápidas e inspección detallada.
+
+### 16. Mya Commands & Observabilidad Determinista (`/info`, `/telemetry`, `/monitor`, etc.)
+- **10 Comandos Formales por Familia:**
+  - `UI_OBSERVABILITY` (Azul): `/info`, `/telemetry`, `/monitor`, `/status`, `/projects`.
+  - `WORKING_MODE` (Verde): `/fast`, `/sci_mode`.
+  - `RESEARCH_ANALYSIS` (Púrpura): `/deep_research`, `/optimize`, `/categorize`.
+  - `DECISION_EXPERTISE` (Ámbar): `/decision`, `/cloud`, `/security`.
+- **Cero Tokens de LLM para Métricas:** Proyecciones en tiempo real reconstruidas desde el `EventStore`.
+- **Escalado Preventivo de Riesgo:** `/fast` escala automáticamente a `PLANNED_CODE` si el router detecta términos sensibles de producción.
+
+### 17. Sistema Visual TUI, Animaciones y Character de Mya (`src/myagentos/ui/theme/`, `src/myagentos/ui/visual/`)
+- **Símbolos Estándar y Redundancia:** Símbolos normativos (`○`, `◌`, `●`, `…`, `Ⅱ`, `!`, `✓`, `×`, `⊘`, `■`) con fallbacks textuales ASCII y badges de coste.
+- **Sistema de Temas y Modos de Movimiento:** Temas `default`, `minimal`, `high_contrast`, `monochrome`; control de animación `full`, `reduced`, `off`.
+- **Fundación de Personaje Desacoplada:** `MyaPresentationState` y `MyaRenderer` con modos `dot` (`● Mya`), `glyph` (`╭─ Mya ──╮`), `ascii` (avatar compuesto reactivo con expresiones faciales) y `minimal` (`[Mya]`).
+- **Comandos de Presentación:** `/theme`, `/motion`, `/avatar`, `/compact`, `/dense`.
+
 ---
 
 ## Requisitos y Configuración de Entorno
@@ -221,6 +249,72 @@ uv run myagentos continue run --dynamic
 uv run myagentos continue report
 ```
 
+### 6. Terminal Interactiva y Comandos de Mya (`mya`)
+
+Lanza la terminal interactiva en Textual o ejecuta comandos de Mya directamente en la consola:
+
+```bash
+# Iniciar la terminal conversacional interactiva (TUI)
+uv run myagentos mya
+# o directamente:
+./mya
+
+# Ejecutar comandos de observabilidad deterministas sin overhead LLM
+uv run myagentos mya /info
+uv run myagentos mya /telemetry
+uv run myagentos mya /monitor
+
+# Ejecutar comandos de análisis especializado
+uv run myagentos mya /fast "corrige error de sintaxis en src/cli.py"
+uv run myagentos mya /deep_research "arquitectura de event sourcing vs CRUD"
+uv run myagentos mya /decision "¿usar sqlite o jsonl para el registro local?"
+uv run myagentos mya /security "auditoría de endpoints de autenticación"
+
+# Configurar temas y avatares visuales
+uv run myagentos mya /theme minimal
+uv run myagentos mya /motion reduced
+uv run myagentos mya /avatar ascii
+```
+
+### 7. Gestor de Proyectos y Project Explorer (`project`)
+
+Administra repositorios locales y remotos registrados en `~/.myagentos/projects.json`:
+
+```bash
+# Listar proyectos activos y sus estados
+uv run myagentos project list
+
+# Registrar un proyecto existente
+uv run myagentos project add /ruta/a/mi-proyecto --name "Mi Proyecto"
+
+# Clonar un repositorio Git remoto
+uv run myagentos project clone https://github.com/usuario/repo.git
+
+# Inspeccionar tags de categorización de un proyecto
+uv run myagentos project tags <project_id>
+
+# Papelera: mover a papelera, listar, restaurar o purgar
+uv run myagentos project trash move <project_id>
+uv run myagentos project trash list
+uv run myagentos project trash restore <project_id>
+uv run myagentos project trash purge <project_id> --confirm
+```
+
+### 8. Categorización de Repositorios (`categorize`)
+
+Escanea y genera el perfil tecnológico jerárquico del repositorio:
+
+```bash
+# Escanear el repositorio actual
+uv run myagentos categorize
+
+# Forzar re-escaneo ignorando caché
+uv run myagentos categorize --force
+
+# Exportar perfil completo en formato JSON
+uv run myagentos categorize --json
+```
+
 ---
 
 ## Estructura Modular del Proyecto
@@ -238,19 +332,32 @@ myAgentOS/
 │   ├── failure/             # Clasificador de fallos determinista y estrategias de curación (§14)
 │   ├── fsm/                 # Controlador de ciclo de vida formal JobController y transiciones (§8)
 │   ├── gateway/             # Model Gateway (Zona Z2), adaptadores OpenAI, Gemini y Mock (§7, §17)
+│   ├── mya/                 # Mya: Interfaz conversacional, comandos especializados y character
+│   │   ├── commands/        # Catálogo, registry, observabilidad determinista y handlers
+│   │   ├── agent.py         # MyaAgent con diálogo, explicaciones y resolución de intención
+│   │   └── presentation.py  # Presentation state y renderers (dot, glyph, ascii, minimal)
 │   ├── pipeline/            # Orquestador integral PipelineOrchestrator y PipelineResult (§8)
 │   ├── planner/             # PlannerAgent, esquemas estructurados de plan y micro-planes (§7)
 │   ├── policy/              # PolicyEngine, enforcer de reglas de alcance y detector de señales (§5)
+│   ├── projects/            # Multi-Project Manager, registro global y motor de categorización
+│   │   ├── categorization/  # Taxonomía, detectores deterministas, inferencia LLM y selector
+│   │   ├── models.py        # Project, ProjectProfile, ProjectTag, ProjectStatus
+│   │   └── service.py       # ProjectManagerService con ciclo de vida completo y papelera
 │   ├── reviewer/            # IndependentReviewer con ceguera estricta y aprobación de diff (§15)
 │   ├── router/              # LocalRouter v0 con comandos slash y heurísticas de riesgo (§6)
 │   ├── sandbox/             # Code Execution Sandbox (Zona Z4): Docker, Subprocess y Mock (§11)
 │   ├── skills/              # Runtime de Skills Just-in-Time con techo de mínimo privilegio (§20, AUD-027)
+│   ├── ui/                  # Interfaz TUI Textual, sistema visual, temas y pantallas interactivas
+│   │   ├── screens/         # ProjectsScreen (explorador de proyectos)
+│   │   ├── theme/           # Temas (default, minimal, high_contrast, monochrome), símbolos y animación
+│   │   ├── visual/          # Control de movimiento, mapeador de estado de eventos y view models
+│   │   └── widgets/         # MyaAvatar, MyaPanel, AgentTree, FileActivity, TokenMeter, JobMonitor
 │   ├── verification/        # VerificationGuard, restaurador de protected_paths y manifest (§13)
 │   ├── worker/              # WorkerLoop con ToolBroker y generador de parches atómicos (§10)
 │   ├── worktree/            # Gestor de git worktrees efímeros y MergeController serializado (§11, §16)
 │   └── cli.py               # Punto de entrada unificado de comandos de consola
-├── tests/                   # 31 suites de pruebas automatizadas unitarias, de integración y adversariales
-└── docs/                    # Especificación formal, arquitectura, manual CLI y benchmarks
+├── tests/                   # 54 suites de pruebas automatizadas (unitarias, integración, UI, TUI, seguridad)
+└── docs/                    # Especificaciones formales, arquitectura, manual CLI y guías de features
 ```
 
 ---
@@ -267,6 +374,11 @@ Para profundizar en la arquitectura, la formalización matemática y los procedi
 | [`docs/benchmark-guide.md`](docs/benchmark-guide.md) | **Guía de Benchmark Empírico:** Metodología científica, métricas clave (§26), dataset estratificado en 5 categorías y comparación observable frente al agente baseline. |
 | [`docs/technical-audit.md`](docs/technical-audit.md) | **Auditoría Técnica y Cumplimiento:** Análisis de discrepancias previas, tabla de hallazgos normativos y matriz de resolución de incidentes de seguridad. |
 | [`docs/continuity-specification.md`](docs/continuity-specification.md) | **Auditoría de Continuidad de Proyectos (PCA):** Diagnóstico estático y dinámico de repositorios en transición, detección de deudas ocultas y síntesis de contexto. |
+| [`docs/agentic-os-feature-cli-ui-mya.md`](docs/agentic-os-feature-cli-ui-mya.md) | **Especificación Mya Dialogue Agent & Interactive CLI/TUI:** Capa de conversación, desambiguación interactiva de intención y arquitectura de sesiones. |
+| [`docs/agentic-os-feature-project-categorization.md`](docs/agentic-os-feature-project-categorization.md) | **Especificación Project Categorization & Profiling:** Taxonomía jerárquica de tecnologías, detección determinista + LLM y profiling de calidad. |
+| [`docs/agentic-os-feature-project-manager-explorer.md`](docs/agentic-os-feature-project-manager-explorer.md) | **Especificación Project Manager & Explorer:** Registro centralizado multi-proyecto, operaciones de ciclo de vida (CRUD/trash) y pantalla interactiva `ProjectsScreen`. |
+| [`docs/agentic-os-feature-mya-commands.md`](docs/agentic-os-feature-mya-commands.md) | **Especificación Mya Commands & Specialization:** Comandos slash especializados (/fast, /sci_mode, /deep_research, /decision), badges de categoría y observabilidad determinista. |
+| [`docs/agentic-os-feature-tui-visual-mya-character.md`](docs/agentic-os-feature-tui-visual-mya-character.md) | **Especificación TUI Visual System & Mya Character:** Sistema de temas, microanimaciones de 0 tokens, reductor de movimiento, avatar desacoplado y widgets de monitoreo. |
 
 ---
 
@@ -275,19 +387,19 @@ Para profundizar en la arquitectura, la formalización matemática y los procedi
 El proyecto aplica controles de calidad rigurosos y obligatorios en cada cambio:
 
 ```bash
-# 1. Ejecución de la suite completa de pruebas (133 tests)
+# 1. Ejecución de la suite completa de pruebas (273 tests)
 uv run pytest
 
 # 2. Análisis estático de tipos con tipado estricto
 uv run mypy src tests
 
 # 3. Linter y formateador de código
-uv run ruff check .
+uv run ruff check src tests
 ```
 
 Estado actual del control de calidad:
-- **Pytest:** `133/133 passed` (0 fallos).
-- **Mypy:** `Success: no issues found in 127 source files` bajo `--strict`.
+- **Pytest:** `273/273 passed` (0 fallos).
+- **Mypy:** `Success: no issues found in 145 source files` bajo `--strict`.
 - **Ruff:** `All checks passed!` (0 advertencias).
 
 ---

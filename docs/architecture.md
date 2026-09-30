@@ -1,4 +1,4 @@
-# Arquitectura del Sistema y Modelo de Amenazas (myAgentOS v2.1)
+# Arquitectura del Sistema y Modelo de Amenazas (myAgentOS v2.2+)
 
 Este documento detalla la arquitectura técnica, las fronteras de aislamiento, el modelo formal de estados y el modelo de amenazas de **myAgentOS**.
 
@@ -11,12 +11,22 @@ Este documento detalla la arquitectura técnica, las fronteras de aislamiento, e
 3. **Preservación Monótona de Riesgo:** El riesgo asignado a una tarea solo puede incrementarse a lo largo del pipeline; ninguna heurística, worker o skill puede rebajar el nivel de riesgo.
 4. **Auditabilidad Criptográfica Inmutable:** Cada transición y evento se encadena mediante hashes criptográficos SHA-256 en un registro inmutable append-only.
 5. **Aislamiento Funcional de Red:** La red está segregada por zonas funcionales; el entorno de ejecución de código (*Code Sandbox*) carece de conectividad externa por defecto.
+6. **Mya no gobierna (Separación Estricta de Presentación):** La capa conversacional y el avatar visual de Mya son proyecciones del `EventStore`. Ninguna expresión, diálogo o comando de Mya puede otorgar autoridad, saltarse una aprobación o alterar el FSM.
 
 ---
 
-## 2. Modelo de Aislamiento en 4 Zonas
+## 2. Modelo de Aislamiento en Zonas (Z0 a Z4)
 
 ```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ ZONA Z0 — Capa de Presentación, Diálogo y TUI (Mya)                    │
+│ (MyaAgent, Textual TUI, ProjectsScreen, MyaRenderer, StateMapper)       │
+│  - Proyección de lectura unidireccional del EventStore                 │
+│  - Traducción de lenguaje natural a UserIntent tipado                  │
+│  - Cero autoridad operativa sobre FSM, tokens, riesgo o políticas      │
+└──────────────────────────────────┬─────────────────────────────────────┘
+                                   │ UserIntent
+                                   ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ ZONA Z1 — Plano de Control y Gobernanza                                │
 │ (JobController, FSM, PolicyEngine, EventStore, LocalRouter)             │
@@ -48,6 +58,7 @@ Este documento detalla la arquitectura técnica, las fronteras de aislamiento, e
 
 | Zona | Conectividad Externa | Autoridad de Modificación | Rol Principal |
 |---|---|---|---|
+| **Z0: Presentación** | No | Ninguna (proyección) | Conversación, TUI, temas y avatar de Mya |
 | **Z1: Control** | No | Solo metadatos y eventos | Gobernar estados FSM y emitir tokens |
 | **Z2: Gateway** | Sí (Solo APIs LLM) | Ninguna | Traducir y enviar prompts acotados |
 | **Z3: Auditoría** | No | Solo Staging (`_inbox/`) | Revisar parches y curar lecciones |
@@ -156,3 +167,5 @@ $$\text{Colisión} = \Delta_{\text{commits}} \cap \Big(\text{scope} \cup \text{d
 | **Bucle Infinito de Reparación Alucinada** | [`FailureClassifier`](../src/myagentos/failure/classifier.py) calcula hashes SHA-256 de diffs entre iteraciones sucesivas; detiene el bucle por estancamiento (`STAGNATION_DETECTED`). |
 | **Persistencia de Secretos en Memoria** | [`DeterministicNoteValidator`](../src/myagentos/curator/validator.py) escanea notas con regex de alta precisión (claves API, tokens, RSA); rechaza la nota si detecta secretos. |
 | **Corrupción o Truncamiento de Logs** | `EventStore` verifica la cadena de hashes SHA-256; aborta cualquier operación si detecta ruptura de enlaces entre eventos. |
+| **Alucinación de Autoridad por el Avatar/Mya** | Mya es estrictamente una capa de presentación (`MyaPresentationState`); sus expresiones o diálogo nunca conceden permisos, no aprueban planes y no alteran la FSM. |
+| **Bypass de Gobernanza vía Comandos Slash (/fast)** | El router local analiza el contenido de `/fast`; si detecta términos de producción o migraciones críticas, escala preventivamente a `PLANNED_CODE` sin excepción. |
