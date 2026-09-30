@@ -6,10 +6,57 @@
 [![Tests: Pytest](https://img.shields.io/badge/tests-273%20passed-brightgreen.svg)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
-**myagentos** es una implementación canónica y de grado de producción de un **Sistema Operativo Agéntico para Ingeniería de Software**, gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/specification.md`](docs/specification.md).
+> **Tú hablas con Mya. Los agentes hacen el trabajo. myAgentOS gobierna y garantiza la seguridad.**
 
-A diferencia de los asistentes de código tradicionales que confían ciegamente en salidas no acotadas de Modelos de Lenguaje (LLMs), **myagentos** opera bajo una premisa fundamental:
-> **El LLM propone; los componentes deterministas del sistema deciden y ejecutan.**
+```text
+                     ╭─────╮
+                     │ ◉ ◉ │
+                     │  ◡  │   "Hola. Estoy en tu repositorio.
+                     ╰─────╯    Dime qué quieres construir o investigar."
+                      Mya
+```
+
+**MYA** es la voz, interfaz conversacional y presencia inteligente de **myAgentOS**, un **Sistema Operativo Agéntico para Ingeniería de Software** de grado de producción gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/specification.md`](docs/specification.md).
+
+A diferencia de los asistentes de código tradicionales que son meros envoltorios de un modelo de lenguaje y confían ciegamente en salidas no acotadas, **MYA** actúa como el puente inteligente entre el desarrollador y una infraestructura de agentes especializados estrictamente gobernados:
+
+```text
+                     AGENTIC OS
+                         │
+              ┌──────────▼──────────┐
+              │        MYA          │  ◄── Tú hablas con Mya
+              │       (LLM)         │      (Conversación, Explicación, Desambiguación)
+              └──────────┬──────────┘
+                         │ UserIntent tipado
+              ┌──────────▼──────────┐
+              │   JOB CONTROLLER    │  ◄── El Kernel decide y gobierna
+              │    (FSM / Policy)   │      (Permisos, Riesgo, Sandbox, Verificación)
+              └──────────┬──────────┘
+                         │ Capability Tokens
+              ┌──────────▼──────────┐
+              │      AGENTS         │  ◄── Los agentes ejecutan en aislamiento
+              │  (Planner, Worker,  │      (Worktrees efímeros, sin red por defecto)
+              │   Reviewer, Curator)│
+              └─────────────────────┘
+```
+
+### ¿Qué hace Mya única?
+
+1. **Conversación Natural y Desambiguación Inteligente:** Interpreta instrucciones complejas en lenguaje natural ("añade autenticación", "optimiza las consultas lentas", "audita la seguridad"). Si una tarea es ambigua o presenta riesgos elevados, Mya no adivina: formula preguntas interactivas concisas con opciones claras antes de emitir la orden.
+2. **Síntesis Determinista a `UserIntent`:** Mya traduce tus instrucciones en contratos formales de intención (`UserIntent`) que el Job Controller valida matemáticamente contra las políticas del proyecto.
+3. **Observabilidad en Tiempo Real con Cero Tokens:** A través de comandos nativos como `/info`, `/telemetry` y `/monitor`, Mya proyecta el estado del repositorio, los archivos modificados y el consumo monetario directamente desde el `EventStore` criptográfico, con 0 overhead de tokens de modelo.
+4. **Modos de Trabajo y Análisis Especializados:** Comandos slash organizados por familias de color y tipados con insignias:
+   - 🟢 `/fast <prompt>`: Ruta rápida para tareas mecánicas seguras con mínima sobrecarga conversacional (auto-escala a planificada si detecta riesgo).
+   - 🟡 `/sci_mode <prompt>`: Modo científico estructurado (Pregunta → Hipótesis → Metodología → Evidencia → Conclusiones).
+   - 🔴 `/deep_research <query>`: Investigación exhaustiva en documentación, estándares y RFCs (**nunca modifica código por defecto**).
+   - 🟡 `/optimize <target>`: Análisis riguroso de cuellos de botella y candidatos de optimización sin alteración automática.
+   - 🟠 `/decision <pregunta>`: Reúne 5 perspectivas independientes (Arquitecto, Rendimiento, Seguridad, Mantenibilidad y Coste) mapeando acuerdos y discrepancias.
+   - 🟡 `/security <prompt>`: Auditoría especializada de ciberseguridad y controles OWASP (solo puede elevar el riesgo de la tarea).
+5. **Identidad Visual y Presencia Adaptativa (TUI):** Una interfaz terminal moderna construida sobre Textual y Rich con temas configurables (`default`, `minimal`, `high_contrast`, `monochrome`), control de microanimaciones (`/motion full|reduced|off`) y avatares con expresiones reactivas (`/avatar dot|glyph|ascii|minimal`).
+
+Premisa fundamental de gobernanza:
+> **Mya interpreta y propone; el núcleo determinista decide y ejecuta.**
+Mya no concede permisos, no puede alterar unilateralmente el FSM de estados ni rebajar el nivel de riesgo de una tarea.
 
 ---
 
