@@ -28,6 +28,7 @@ class SlashCommandKind(StrEnum):
     REJECT = "reject"
     DEBUG = "debug"
     USAGE = "usage"
+    KEY = "key"
     MODEL = "model"
     SETTINGS = "settings"
     AUDIT = "audit"
@@ -88,6 +89,8 @@ _SLASH_MAP: dict[str, SlashCommandKind] = {
     "/reject": SlashCommandKind.REJECT,
     "/debug": SlashCommandKind.DEBUG,
     "/usage": SlashCommandKind.USAGE,
+    "/key": SlashCommandKind.KEY,
+    "/keys": SlashCommandKind.KEY,
     "/model": SlashCommandKind.MODEL,
     "/settings": SlashCommandKind.SETTINGS,
     "/audit": SlashCommandKind.AUDIT,

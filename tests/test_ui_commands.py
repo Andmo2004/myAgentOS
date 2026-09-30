@@ -69,6 +69,21 @@ class TestParseInput:
         cmd = parse_input("/HELP")
         assert cmd.kind == SlashCommandKind.HELP
 
+    def test_key_command(self) -> None:
+        cmd = parse_input("/key openai sk-test123")
+        assert cmd.kind == SlashCommandKind.KEY
+        assert cmd.argument == "openai sk-test123"
+
+    def test_keys_alias(self) -> None:
+        cmd = parse_input("/keys")
+        assert cmd.kind == SlashCommandKind.KEY
+        assert cmd.argument == ""
+
+    def test_model_command(self) -> None:
+        cmd = parse_input("/model gpt-4o")
+        assert cmd.kind == SlashCommandKind.MODEL
+        assert cmd.argument == "gpt-4o"
+
     def test_diff_command(self) -> None:
         cmd = parse_input("/diff")
         assert cmd.kind == SlashCommandKind.DIFF

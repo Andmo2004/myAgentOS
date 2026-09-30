@@ -37,6 +37,22 @@ _BUILTIN_COMMANDS: list[CommandDefinition] = [
         expected_cost=ExpectedCost.LOW,
         supports_arguments=False,
     ),
+    CommandDefinition(
+        name="key",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Muestra o configura las claves API (OpenAI, Gemini) y guarda en .env",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=True,
+    ),
+    CommandDefinition(
+        name="model",
+        version="1.0.0",
+        category=CommandCategory.UI_OBSERVABILITY,
+        description="Muestra o cambia el modelo LLM activo para Mya",
+        expected_cost=ExpectedCost.LOW,
+        supports_arguments=True,
+    ),
     # 2. Working Modes
     CommandDefinition(
         name="fast",

@@ -65,6 +65,10 @@ HELP_TEXT = """\
   /motion [mode]         animation mode (full, reduced, off)
   /avatar [mode]         mya avatar style (dot, glyph, ascii, minimal)
   /compact, /dense       toggle display density
+
+[bold cyan]Config & Models:[/bold cyan]
+  /key [provider] [key]  configura claves API (openai, gemini) y guarda en .env 🟢
+  /model [name]          muestra o cambia el modelo activo (gpt-4o, gemini-2.0-flash...) 🟢
 """
 
 
@@ -117,9 +121,9 @@ class WelcomePanel(Static):
                 "",
                 (
                     f"  [{Colors.DIM}]/help[/{Colors.DIM}]  commands    "
-                    f"[{Colors.DIM}]/projects[/{Colors.DIM}]  projects    "
-                    f"[{Colors.DIM}]/status[/{Colors.DIM}]  status    "
-                    f"[{Colors.DIM}]/categorize[/{Colors.DIM}]  tags"
+                    f"[{Colors.DIM}]/key[/{Colors.DIM}]  api keys    "
+                    f"[{Colors.DIM}]/model[/{Colors.DIM}]  models    "
+                    f"[{Colors.DIM}]/projects[/{Colors.DIM}]  projects"
                 ),
                 "",
             ]
@@ -529,6 +533,12 @@ class MyaApp(App[None]):
                     f"{badge} Densidad visual cambiada a [bold green]cómodo[/bold green]."
                 )
 
+            case SlashCommandKind.KEY | SlashCommandKind.SETTINGS:
+                self._handle_key_command(cmd.argument)
+
+            case SlashCommandKind.MODEL:
+                self._handle_model_command(cmd.argument)
+
             case SlashCommandKind.NATURAL | SlashCommandKind.MYA:
                 prompt = cmd.argument if cmd.kind == SlashCommandKind.MYA else cmd.raw_input
                 await self._handle_natural_input(prompt.strip())
@@ -538,6 +548,210 @@ class MyaApp(App[None]):
                     f"[{Colors.DIM}]Command /{cmd.kind.value} "
                     f"will be available in a future version.[/{Colors.DIM}]"
                 )
+
+    def _save_env_var(self, key: str, value: str) -> None:
+        """Safely saves or updates a key=value in .env file."""
+        env_path = (self.session.repo_root or Path.cwd()) / ".env"
+        lines: list[str] = []
+        found = False
+        if env_path.is_file():
+            try:
+                lines = env_path.read_text(encoding="utf-8").splitlines()
+            except Exception:
+                lines = []
+
+        new_lines: list[str] = []
+        for line in lines:
+            if line.strip().startswith(f"{key}=") or line.strip().startswith(f"export {key}="):
+                new_lines.append(f"{key}={value}")
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found:
+            new_lines.append(f"{key}={value}")
+
+        try:
+            env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def _refresh_ui_model(self) -> None:
+        """Refresh model display in status bar and welcome panel."""
+        try:
+            welcome = self.query_one("#welcome", WelcomePanel)
+            welcome.model_id = self.mya_agent.model_id
+            welcome.refresh()
+        except Exception:
+            pass
+        try:
+            status_bar = self.query_one("#status-bar", Static)
+            status_bar.update(self._render_status_bar())
+        except Exception:
+            pass
+
+    def _handle_key_command(self, argument: str) -> None:
+        """Handle /key and /keys commands to view or set API keys."""
+        badge = format_command_badge("/key")
+        args = argument.strip().split(maxsplit=1)
+
+        def _mask(k: str) -> str:
+            if not k:
+                return "[dim]No configurada[/dim]"
+            if len(k) <= 8:
+                return f"[green]*** ({len(k)} chars)[/green]"
+            return f"[bold green]{k[:6]}...{k[-4:]}[/bold green]"
+
+        openai_key = os.getenv("OPENAI_API_KEY", "")
+        gemini_key = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+
+        if not args or not args[0]:
+            openai_status = _mask(openai_key)
+            gemini_status = _mask(gemini_key)
+            active_model = self.mya_agent.model_id
+
+            self._append_mya_message(
+                f"{badge} [bold]CONFIGURACIÓN DE CLAVES API Y MODELOS[/bold]\n\n"
+                f"  • [bold]OpenAI[/bold] (OPENAI_API_KEY):  {openai_status}\n"
+                f"  • [bold]Gemini[/bold] (GEMINI_API_KEY):  {gemini_status}\n"
+                f"  • [bold]Modelo activo[/bold]:          [bold cyan]{active_model}[/bold cyan]\n"
+                f"  • [bold]Archivo de claves[/bold]:      .env\n\n"
+                f"[dim]Uso para configurar:[/dim]\n"
+                f"  [bold]/key openai <tu_clave>[/bold]    OpenAI (activa gpt-4o)\n"
+                f"  [bold]/key gemini <tu_clave>[/bold]    Gemini (activa gemini-2.0-flash)\n"
+                f"  [bold]/model <nombre>[/bold]           Cambiar modelo (ej: gpt-4o-mini)"
+            )
+            return
+
+        provider = args[0].lower()
+        if len(args) < 2 or not args[1].strip():
+            self._append_mya_message(
+                f"{badge} [bold yellow]Uso:[/bold yellow] /key {provider} <tu_api_key>\n"
+                f"[dim]Ejemplo: /key openai sk-proj-...[/dim]"
+            )
+            return
+
+        key_value = args[1].strip()
+
+        if provider in ("openai", "chatgpt"):
+            self._save_env_var("OPENAI_API_KEY", key_value)
+            os.environ["OPENAI_API_KEY"] = key_value
+            try:
+                from myagentos.gateway.openai_adapter import OpenAIAdapter
+
+                self.gateway.register_adapter("openai", OpenAIAdapter(api_key=key_value))
+            except Exception as err:
+                self._append_mya_message(
+                    f"{badge} [bold red]Error al registrar OpenAIAdapter:[/bold red] {err}"
+                )
+                return
+
+            if self.mya_agent.model_id in ("mock-mya", "mock"):
+                self.mya_agent.model_id = "gpt-4o"
+                self._save_env_var("MYA_MODEL", "gpt-4o")
+                os.environ["MYA_MODEL"] = "gpt-4o"
+                self._refresh_ui_model()
+
+            masked = _mask(key_value)
+            self._append_mya_message(
+                f"{badge} [bold green]✓ Clave de OpenAI guardada exitosamente[/bold green]\n\n"
+                f"  • Clave:         {masked}\n"
+                f"  • Persistencia:  .env\n"
+                f"  • Proveedor:     'openai' activo\n"
+                f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
+            )
+
+        elif provider in ("gemini", "google"):
+            self._save_env_var("GEMINI_API_KEY", key_value)
+            os.environ["GEMINI_API_KEY"] = key_value
+            os.environ["GOOGLE_API_KEY"] = key_value
+            try:
+                from myagentos.gateway.gemini_adapter import GeminiAdapter
+
+                self.gateway.register_adapter("google", GeminiAdapter(api_key=key_value))
+            except Exception as err:
+                self._append_mya_message(
+                    f"{badge} [bold red]Error al registrar GeminiAdapter:[/bold red] {err}"
+                )
+                return
+
+            if self.mya_agent.model_id in ("mock-mya", "mock"):
+                self.mya_agent.model_id = "gemini-2.0-flash"
+                self._save_env_var("MYA_MODEL", "gemini-2.0-flash")
+                os.environ["MYA_MODEL"] = "gemini-2.0-flash"
+                self._refresh_ui_model()
+
+            masked = _mask(key_value)
+            self._append_mya_message(
+                f"{badge} [bold green]✓ Clave de Google Gemini guardada[/bold green]\n\n"
+                f"  • Clave:         {masked}\n"
+                f"  • Persistencia:  .env\n"
+                f"  • Proveedor:     'google' activo\n"
+                f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
+            )
+
+        else:
+            self._append_mya_message(
+                f"{badge} [bold red]Proveedor desconocido '{provider}'.[/bold red]\n"
+                f"Proveedores soportados: [bold]openai[/bold], [bold]gemini[/bold]"
+            )
+
+    def _handle_model_command(self, argument: str) -> None:
+        """Handle /model command to view or switch active model."""
+        badge = format_command_badge("/model")
+        arg = argument.strip()
+        if not arg:
+            curr = self.mya_agent.model_id
+            adapters = list(self.gateway.adapters.keys())
+            self._append_mya_message(
+                f"{badge} [bold]MODELO LLM DE MYA[/bold]\n\n"
+                f"  • Modelo activo:            [bold cyan]{curr}[/bold cyan]\n"
+                f"  • Adaptadores registrados:  {', '.join(adapters)}\n\n"
+                f"[dim]Modelos habituales:[/dim]\n"
+                f"  • OpenAI:  gpt-4o, gpt-4o-mini, o1, o3-mini\n"
+                f"  • Gemini:  gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash\n"
+                f"  • Mock:    mock-mya (simulador local)\n\n"
+                f"[dim]Uso: /model <nombre_del_modelo>[/dim]"
+            )
+            return
+
+        target_model = arg
+        if "gpt" in target_model or "openai" in target_model:
+            if "openai" not in self.gateway.adapters:
+                key = os.getenv("OPENAI_API_KEY")
+                if key:
+                    from myagentos.gateway.openai_adapter import OpenAIAdapter
+
+                    self.gateway.register_adapter("openai", OpenAIAdapter(api_key=key))
+                else:
+                    self._append_mya_message(
+                        f"{badge} [bold yellow]Advertencia:[/bold yellow] "
+                        "OPENAI_API_KEY no configurada.\n"
+                        f"Configúrala primero con: [bold]/key openai <tu_clave>[/bold]"
+                    )
+        elif "gemini" in target_model:
+            if "google" not in self.gateway.adapters:
+                key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+                if key:
+                    from myagentos.gateway.gemini_adapter import GeminiAdapter
+
+                    self.gateway.register_adapter("google", GeminiAdapter(api_key=key))
+                else:
+                    self._append_mya_message(
+                        f"{badge} [bold yellow]Advertencia:[/bold yellow] "
+                        "GEMINI_API_KEY no configurada.\n"
+                        f"Configúrala primero con: [bold]/key gemini <tu_clave>[/bold]"
+                    )
+
+        self.mya_agent.model_id = target_model
+        os.environ["MYA_MODEL"] = target_model
+        self._save_env_var("MYA_MODEL", target_model)
+        self._refresh_ui_model()
+
+        self._append_mya_message(
+            f"{badge} [bold green]✓ Modelo activo cambiado a '{target_model}'[/bold green]\n"
+            f"  Guardado en .env (MYA_MODEL={target_model})"
+        )
 
     async def _handle_natural_input(self, text: str) -> None:
         """Handle natural language input — route through Mya LLM."""

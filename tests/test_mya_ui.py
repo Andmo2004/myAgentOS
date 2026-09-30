@@ -1,5 +1,9 @@
 """Tests for Mya interactive terminal UI (headless Textual app)."""
 
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
 from textual.widgets import Input
 
@@ -177,4 +181,56 @@ async def test_mya_app_model_auto_detection(monkeypatch: pytest.MonkeyPatch) -> 
     app_gemini = MyaApp()
     assert app_gemini.mya_agent.model_id == "gemini-2.0-flash"
     assert "google" in app_gemini.gateway.adapters
+
+
+@pytest.mark.asyncio
+async def test_mya_app_key_and_model_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify in-app /key and /model commands update adapters, env, and active model."""
+    temp_dir = Path(tempfile.mkdtemp())
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("MYA_MODEL", raising=False)
+
+    app = MyaApp(repo_path=temp_dir)
+    async with app.run_test(size=(80, 24)) as pilot:
+        inp = pilot.app.query_one("#prompt-input", Input)
+
+        # 1. View keys status
+        inp.value = "/keys"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        # 2. Configure OpenAI key
+        inp.value = "/key openai sk-proj-1234567890abcdef"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.mya_agent.model_id == "gpt-4o"
+        assert "openai" in app.gateway.adapters
+        assert os.environ.get("OPENAI_API_KEY") == "sk-proj-1234567890abcdef"
+        # Verify saved to .env
+        env_content = (temp_dir / ".env").read_text(encoding="utf-8")
+        assert "OPENAI_API_KEY=sk-proj-1234567890abcdef" in env_content
+        assert "MYA_MODEL=gpt-4o" in env_content
+
+        # 3. Switch model
+        inp.value = "/model gpt-4o-mini"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert app.mya_agent.model_id == "gpt-4o-mini"
+        env_content_updated = (temp_dir / ".env").read_text(encoding="utf-8")
+        assert "MYA_MODEL=gpt-4o-mini" in env_content_updated
+
+        # 4. Configure Gemini key
+        inp.value = "/key gemini AIzaSy9876543210zyxw"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert "google" in app.gateway.adapters
+        assert os.environ.get("GEMINI_API_KEY") == "AIzaSy9876543210zyxw"
+        env_content_gemini = (temp_dir / ".env").read_text(encoding="utf-8")
+        assert "GEMINI_API_KEY=AIzaSy9876543210zyxw" in env_content_gemini
+
 
