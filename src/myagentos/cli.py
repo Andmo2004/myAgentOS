@@ -1,6 +1,7 @@
 """Command line interface for myagentos."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from myagentos.core.models.risk import RiskLevel
 from myagentos.core.store.event_store import EventStore
 from myagentos.core.store.state_projector import StateProjector
 from myagentos.pipeline import PipelineConfig, PipelineOrchestrator
+from myagentos.projects import ProjectFilter, ProjectManagerService
 from myagentos.router.models import RoutingIntent
 from myagentos.router.rules import LocalRouter
 
@@ -488,45 +490,186 @@ def cmd_categorize(repo_path: str = ".", force: bool = False, json_output: bool 
 
 
 def cmd_project(
-    action: str,
-    project_id: str | None = None,
+    action: str = "list",
+    target: str | None = None,
+    secondary: str | None = None,
+    name: str | None = None,
     repo_path: str = ".",
+    tag: str | None = None,
+    search: str | None = None,
     json_output: bool = False,
     force: bool = False,
+    confirm: bool = False,
 ) -> None:
-    root = Path(repo_path).resolve()
-    service = ProjectCategorizationService()
+    mgr = ProjectManagerService()
 
-    if action == "categorize":
-        cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
-        return
+    if action == "list":
+        projects = mgr.list_projects(
+            filter_criteria=ProjectFilter(query=search, tag=tag)
+        )
+        if json_output:
+            console.print(json.dumps([p.model_dump(mode="json") for p in projects], indent=2))
+            return
 
-    profile = service.scan_project(root, project_id=project_id, force=force)
+        table = Table(title=f"Agentic OS — Active Projects ({len(projects)})")
+        table.add_column("Project", style="bold cyan")
+        table.add_column("State", style="green")
+        table.add_column("Visible Tags", style="magenta")
+        table.add_column("Path", style="dim")
+        table.add_column("Git", style="yellow")
 
-    if json_output:
-        console.print(profile.model_dump_json(indent=2))
-        return
+        for p in projects:
+            tags = " ".join(f"[{t.label}]" for t in p.visible_tags)
+            git_info = f"{p.branch or 'N/A'}"
+            if p.commit_short:
+                git_info += f" ({p.commit_short})"
+            table.add_row(p.name, p.state.value.upper(), tags, p.path, git_info)
 
-    if action == "tags":
-        table = Table(title=f"Visible Tags: {profile.repository}")
-        table.add_column("Tag", style="bold magenta")
-        table.add_column("Category", style="cyan")
-        table.add_column("Confidence", style="green")
-        table.add_column("Source", style="yellow")
-        table.add_column("Pinned", style="blue")
-
-        for tag in profile.visible_tags:
-            table.add_row(
-                tag.label,
-                tag.category.value,
-                f"{tag.confidence:.2f}",
-                tag.source.value,
-                "✓" if tag.pinned else "",
-            )
         console.print(table)
         return
 
-    cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
+    if action == "add":
+        target_path = Path(target or repo_path).resolve()
+        try:
+            proj = mgr.add_project(target_path, name=name)
+            console.print(
+                f"[bold green]✓ Project added:[/bold green] {proj.name} "
+                f"({proj.project_id})"
+            )
+            tags = " ".join(f"[{t.label}]" for t in proj.visible_tags)
+            console.print(f"  Visible tags: [magenta]{tags}[/magenta]")
+            console.print(f"  Mya namespace: [dim]{proj.mya_namespace_id}[/dim]")
+        except Exception as exc:
+            console.print(f"[bold red]✗ Failed adding project:[/bold red] {exc}")
+            sys.exit(1)
+        return
+
+    if action == "new":
+        if not target:
+            console.print(
+                "[bold red]✗ Project name is required for 'project new <name>'[/bold red]"
+            )
+            sys.exit(1)
+        new_dir = Path(repo_path) / target if repo_path != "." else Path.cwd() / target
+        try:
+            proj = mgr.create_project(name=target, path=new_dir)
+            console.print(
+                f"[bold green]✓ Project created:[/bold green] {proj.name} "
+                f"({proj.project_id})"
+            )
+            console.print(f"  Location: {proj.path}")
+        except Exception as exc:
+            console.print(f"[bold red]✗ Failed creating project:[/bold red] {exc}")
+            sys.exit(1)
+        return
+
+    if action == "clone":
+        if not target or not secondary:
+            console.print(
+                "[bold red]✗ URL and destination required for 'project clone'[/bold red]"
+            )
+            sys.exit(1)
+        try:
+            proj = mgr.clone_repository(url=target, destination=secondary, name=name)
+            console.print(
+                f"[bold green]✓ Repository cloned and registered:[/bold green] {proj.name} "
+                f"({proj.project_id})"
+            )
+        except Exception as exc:
+            console.print(f"[bold red]✗ Failed cloning repository:[/bold red] {exc}")
+            sys.exit(1)
+        return
+
+    if action == "trash":
+        sub = target or "list"
+        if sub == "list":
+            trash_items = mgr.list_trash()
+            if json_output:
+                dumped = [p.model_dump(mode="json") for p in trash_items]
+                console.print(json.dumps(dumped, indent=2))
+                return
+            table = Table(title=f"Agentic OS — Project Trash ({len(trash_items)})")
+            table.add_column("Project", style="bold red")
+            table.add_column("Tags", style="magenta")
+            table.add_column("Location", style="dim")
+            table.add_column("Trashed At", style="yellow")
+
+            for p in trash_items:
+                tags = " ".join(f"[{t.label}]" for t in p.visible_tags)
+                trashed_time = p.trashed_at.strftime("%Y-%m-%d %H:%M") if p.trashed_at else "N/A"
+                table.add_row(p.name, tags, p.path, trashed_time)
+
+            console.print(table)
+            return
+
+        proj_id = secondary or target
+        if not proj_id:
+            console.print("[bold red]✗ Project ID or name required[/bold red]")
+            sys.exit(1)
+
+        target_proj = mgr.get_project(proj_id)
+        if not target_proj:
+            console.print(f"[bold red]✗ Project not found: {proj_id}[/bold red]")
+            sys.exit(1)
+
+        if sub == "move":
+            updated = mgr.move_to_trash(target_proj.project_id)
+            console.print(
+                f"[bold yellow]✓ Moved '{updated.name}' to Trash.[/bold yellow]\n"
+                f"  [dim]Repository files at '{updated.path}' remain untouched on disk.[/dim]"
+            )
+            return
+
+        if sub == "restore":
+            restored = mgr.restore_project(target_proj.project_id)
+            console.print(f"[bold green]✓ Restored '{restored.name}' to ACTIVE.[/bold green]")
+            return
+
+        if sub == "purge":
+            if not confirm:
+                console.print(
+                    f"[bold red]Permanently delete registration for '{target_proj.name}'?[/bold red]\n"
+                    "This removes project registration and Mya memory association.\n"
+                    "The repository code on disk will NOT be deleted.\n"
+                    "Pass [bold]--confirm[/bold] to proceed."
+                )
+                sys.exit(1)
+            mgr.delete_permanently(target_proj.project_id, confirm=True)
+            console.print(
+                f"[bold red]✓ Permanently deleted registration for '{target_proj.name}'.[/bold red]\n"
+                f"  [dim]Repository files at '{target_proj.path}' were NOT deleted.[/dim]"
+            )
+            return
+
+    # Fallback to profile / tags / categorize
+    if action in ("categorize", "profile", "tags"):
+        cat_service = ProjectCategorizationService()
+        root = Path(repo_path).resolve()
+        if action == "categorize":
+            cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
+            return
+        profile = cat_service.scan_project(root, project_id=target, force=force)
+        if json_output:
+            console.print(profile.model_dump_json(indent=2))
+            return
+        if action == "tags":
+            table = Table(title=f"Visible Tags: {profile.repository}")
+            table.add_column("Tag", style="bold magenta")
+            table.add_column("Category", style="cyan")
+            table.add_column("Confidence", style="green")
+            table.add_column("Source", style="yellow")
+            table.add_column("Pinned", style="blue")
+            for t in profile.visible_tags:
+                table.add_row(
+                    t.label,
+                    t.category.value,
+                    f"{t.confidence:.2f}",
+                    t.source.value,
+                    "✓" if t.pinned else "",
+                )
+            console.print(table)
+            return
+        cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
 
 
 def main() -> None:
@@ -602,16 +745,33 @@ def main() -> None:
     p_categorize.add_argument("--force", action="store_true", help="Force re-scan")
     p_categorize.add_argument("--json", action="store_true", help="Output JSON profile")
 
-    # project command (§21)
-    p_proj = subparsers.add_parser("project", help="Manage project profile and tags (§21)")
+    # project command (§21 & Project Manager)
+    p_proj = subparsers.add_parser("project", help="Manage projects and project explorer")
     p_proj.add_argument(
         "action",
-        choices=["categorize", "profile", "tags"],
-        help="Action to execute",
+        nargs="?",
+        default="list",
+        choices=["list", "add", "new", "clone", "trash", "categorize", "profile", "tags"],
+        help="Action to execute (default: list)",
     )
-    p_proj.add_argument("project_id", nargs="?", default=None, help="Optional project ID")
+    p_proj.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Target project ID, path, URL, or trash sub-action (list, move, restore, purge)",
+    )
+    p_proj.add_argument(
+        "secondary",
+        nargs="?",
+        default=None,
+        help="Secondary target (clone destination path or project ID for trash)",
+    )
+    p_proj.add_argument("--name", default=None, help="Project name")
     p_proj.add_argument("--repo", default=".", help="Repository root path")
+    p_proj.add_argument("--tag", default=None, help="Filter by tag label")
+    p_proj.add_argument("--search", default=None, help="Search query filter")
     p_proj.add_argument("--force", action="store_true", help="Force re-scan")
+    p_proj.add_argument("--confirm", action="store_true", help="Confirm permanent deletion")
     p_proj.add_argument("--json", action="store_true", help="Output as JSON")
 
     args = parser.parse_args()
@@ -649,10 +809,15 @@ def main() -> None:
     elif args.subcommand == "project":
         cmd_project(
             action=args.action,
-            project_id=args.project_id,
+            target=args.target,
+            secondary=args.secondary,
+            name=args.name,
             repo_path=args.repo,
+            tag=args.tag,
+            search=args.search,
             json_output=args.json,
             force=args.force,
+            confirm=args.confirm,
         )
 
 

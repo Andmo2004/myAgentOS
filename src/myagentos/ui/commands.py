@@ -34,6 +34,7 @@ class SlashCommandKind(StrEnum):
     VERIFY = "verify"
     TESTS = "tests"
     CATEGORIZE = "categorize"
+    PROJECTS = "projects"
 
     # Mya commands (passed to Mya agent)
     MYA = "mya"
@@ -74,6 +75,7 @@ _SLASH_MAP: dict[str, SlashCommandKind] = {
     "/verify": SlashCommandKind.VERIFY,
     "/tests": SlashCommandKind.TESTS,
     "/categorize": SlashCommandKind.CATEGORIZE,
+    "/projects": SlashCommandKind.PROJECTS,
     "/mya": SlashCommandKind.MYA,
 }
 

@@ -479,6 +479,83 @@ class MyaAgent:
                 "y los tags visibles."
             )
 
+        list_projects_queries = [
+            "mis proyectos",
+            "listar proyectos",
+            "ver proyectos",
+            "muéstrame mis proyectos",
+            "muestrame mis proyectos",
+            "qué proyectos tengo",
+            "que proyectos tengo",
+            "cuáles son mis proyectos",
+            "cuales son mis proyectos",
+            "lista de proyectos",
+        ]
+        if any(lp in lower for lp in list_projects_queries):
+            from myagentos.projects.service import ProjectManagerService
+
+            try:
+                mgr = ProjectManagerService()
+                projs = mgr.list_projects()
+                if not projs:
+                    return (
+                        "No tienes ningún proyecto registrado en Agentic OS todavía. "
+                        "Puedes crear uno nuevo con `myagentos project new <nombre>` "
+                        "o registrar uno existente con /projects o `myagentos project add <path>`."
+                    )
+                lines = [f"Tienes {len(projs)} proyecto(s) activo(s) en Agentic OS:\n"]
+                for p in projs:
+                    tags = " ".join(f"[{t.label}]" for t in p.visible_tags)
+                    lines.append(f"• {p.name} {tags} ({p.path})")
+                lines.append("\nPuedes explorar o cambiar de proyecto con /projects.")
+                return "\n".join(lines)
+            except Exception as exc:
+                return f"No he podido consultar los proyectos: {exc}"
+
+        trash_queries = [
+            "papelera",
+            "proyectos en la papelera",
+            "qué hay en la papelera",
+            "que hay en la papelera",
+        ]
+        if any(tq in lower for tq in trash_queries):
+            from myagentos.projects.service import ProjectManagerService
+
+            try:
+                mgr = ProjectManagerService()
+                trash = mgr.list_trash()
+                if not trash:
+                    return "La papelera está vacía. Todos tus proyectos registrados están activos."
+                lines = [f"Hay {len(trash)} proyecto(s) en la papelera:\n"]
+                for p in trash:
+                    lines.append(f"• {p.name} ({p.path})")
+                lines.append(
+                    "\nPuedes restaurarlos con /projects o "
+                    "`myagentos project trash restore <nombre>`."
+                )
+                lines.append("Nota de seguridad: Sus repositorios en disco permanecen intactos.")
+                return "\n".join(lines)
+            except Exception as exc:
+                return f"No he podido consultar la papelera: {exc}"
+
+        delete_queries = [
+            "borra este proyecto",
+            "borrar este proyecto",
+            "elimina este proyecto",
+            "eliminar este proyecto",
+            "borra el proyecto",
+            "elimina el proyecto",
+            "mover a la papelera",
+        ]
+        if any(dq in lower for dq in delete_queries):
+            return (
+                "Para proteger tu trabajo, yo no ejecuto eliminaciones de proyectos directamente. "
+                "Puedes gestionar el ciclo de vida del proyecto desde el Project Explorer con "
+                "/projects o usando `myagentos project trash move <nombre>`. "
+                "Recuerda que mover a la papelera es reversible y que tus archivos en disco "
+                "nunca se borran."
+            )
+
         return (
             f"Te escucho. He tomado nota de: '{clean_input}'. "
             "Si quieres ejecutarlo como tarea, dímelo y lo estructuro para el sistema."

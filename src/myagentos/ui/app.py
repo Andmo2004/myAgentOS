@@ -23,6 +23,7 @@ from myagentos.ui.commands import (
     SlashCommandKind,
     parse_input,
 )
+from myagentos.ui.screens.projects import ProjectsScreen
 from myagentos.ui.session import Session, create_session
 from myagentos.ui.themes import Colors, Icons
 
@@ -31,8 +32,10 @@ HELP_TEXT = """\
   "añade autenticación"
   "arregla los tests"
   "continúa este proyecto"
+  "muéstrame mis proyectos"
 
 [bold cyan]Commands:[/bold cyan]
+  /projects    project explorer & management
   /status      project status
   /categorize  scan & profile project
   /jobs        active jobs
@@ -92,7 +95,8 @@ class WelcomePanel(Static):
                 "",
                 (
                     f"  [{Colors.DIM}]/help[/{Colors.DIM}]  commands    "
-                    f"[{Colors.DIM}]/status[/{Colors.DIM}]  project    "
+                    f"[{Colors.DIM}]/projects[/{Colors.DIM}]  projects    "
+                    f"[{Colors.DIM}]/status[/{Colors.DIM}]  status    "
                     f"[{Colors.DIM}]/categorize[/{Colors.DIM}]  tags"
                 ),
                 "",
@@ -165,6 +169,7 @@ class MyaApp(App[None]):
     BINDINGS = [
         Binding("ctrl+c", "cancel", "Cancel", show=False),
         Binding("ctrl+d", "quit", "Exit", show=False),
+        Binding("ctrl+p", "open_projects", "Projects", show=True),
         Binding("escape", "escape", "Escape", show=False),
     ]
 
@@ -267,6 +272,9 @@ class MyaApp(App[None]):
                     f"[bold]Checks:[/bold] Typing: {type_check} | Linting: {lint_check}",
                 ]
                 self._append_mya_message("\n".join(summary_lines))
+
+            case SlashCommandKind.PROJECTS:
+                self.action_open_projects()
 
             case SlashCommandKind.NATURAL | SlashCommandKind.MYA:
                 prompt = cmd.argument if cmd.kind == SlashCommandKind.MYA else cmd.raw_input
@@ -428,6 +436,19 @@ class MyaApp(App[None]):
         """Handle Escape — clear input."""
         inp = self.query_one("#prompt-input", Input)
         inp.value = ""
+
+    def action_open_projects(self) -> None:
+        """Open the Project Explorer screen."""
+
+        def on_return(_: Any = None) -> None:
+            # Refresh header/status bar/welcome when returning from Project Explorer
+            try:
+                self.query_one("#welcome", WelcomePanel).refresh()
+                self.query_one("#status-bar", Static).update(self._render_status_bar())
+            except Exception:
+                pass
+
+        self.push_screen(ProjectsScreen(session=self.session), on_return)
 
     async def action_quit(self) -> None:
         """Handle Ctrl+D — exit."""
