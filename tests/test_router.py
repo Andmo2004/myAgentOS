@@ -23,6 +23,20 @@ def test_router_slash_commands() -> None:
     decision_doc = router.route("/doc where is the database connection defined?")
     assert decision_doc.intent == RoutingIntent.DOC_LOOKUP
 
+    # /continue command (§3 of PCA spec)
+    decision_cont = router.route("/continue inspect project health")
+    assert decision_cont.intent == RoutingIntent.PROJECT_CONTINUATION
+    assert decision_cont.confidence == 1.0
+    assert decision_cont.cleaned_prompt == "inspect project health"
+
+    # /audit-project command
+    decision_audit = router.route("/audit-project")
+    assert decision_audit.intent == RoutingIntent.PROJECT_CONTINUATION
+
+    # Heuristic matching
+    decision_heur = router.route("analiza este proyecto y dime cómo continuar")
+    assert decision_heur.intent == RoutingIntent.PROJECT_CONTINUATION
+
 
 def test_router_direct_slash_and_false_direct_escalation() -> None:
     router = LocalRouter()

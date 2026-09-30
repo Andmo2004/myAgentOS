@@ -119,6 +119,178 @@ def cmd_benchmark() -> None:
     console.print(table)
 
 
+def cmd_continue(
+    action: str = "run",
+    repo_path: str = ".",
+    dynamic: bool = False,
+) -> None:
+    import json
+    import subprocess
+    import time
+
+    from rich.markdown import Markdown
+
+    from myagentos.continuity.discovery import run_static_discovery
+    from myagentos.continuity.models import (
+        BaselineCheckResult,
+        DiagnosticType,
+        FindingSeverity,
+        ProjectBaseline,
+    )
+    from myagentos.continuity.snapshot import create_project_snapshot
+    from myagentos.continuity.store import ContinuityStore
+    from myagentos.continuity.synthesizer import synthesize_continuation_report
+
+    root = Path(repo_path).resolve()
+    store = ContinuityStore(root)
+    project_id = root.name
+
+    if action == "report":
+        pdir = store.base_dir / project_id / "continuity"
+        if not pdir.is_dir():
+            console.print(
+                f"[yellow]No continuation context for '{project_id}'."
+                " Run `myagentos continue` first.[/yellow]"
+            )
+            return
+        snaps = sorted(
+            [d for d in pdir.iterdir() if d.is_dir()],
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        if not snaps or not (snaps[0] / "CONTINUATION_CONTEXT.md").is_file():
+            console.print(f"[yellow]No CONTINUATION_CONTEXT.md found for '{project_id}'.[/yellow]")
+            return
+        md_text = (snaps[0] / "CONTINUATION_CONTEXT.md").read_text(encoding="utf-8")
+        console.print(Markdown(md_text))
+        return
+
+    if action == "findings":
+        pdir = store.base_dir / project_id / "continuity"
+        snaps = (
+            sorted(
+                [d for d in pdir.iterdir() if d.is_dir()],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+            if pdir.is_dir()
+            else []
+        )
+        if not snaps or not (snaps[0] / "findings.json").is_file():
+            console.print(
+                f"[yellow]No findings found for '{project_id}'."
+                " Run `myagentos continue` first.[/yellow]"
+            )
+            return
+
+        findings_data = json.loads((snaps[0] / "findings.json").read_text(encoding="utf-8"))
+        f_table = Table(title=f"Findings — {project_id} ({snaps[0].name})")
+        f_table.add_column("ID", style="cyan")
+        f_table.add_column("Severity", style="magenta")
+        f_table.add_column("Code", style="bold")
+        f_table.add_column("Title")
+        for item in findings_data:
+            sev = item.get("severity", "INFO")
+            style = (
+                "red" if sev in ("BLOCKER", "HIGH") else ("yellow" if sev == "MEDIUM" else "dim")
+            )
+            f_table.add_row(
+                item.get("finding_id", ""),
+                f"[{style}]{sev}[/{style}]",
+                item.get("code", ""),
+                item.get("title", ""),
+            )
+        console.print(f_table)
+        return
+
+    # Action is 'run' or 'refresh'
+    console.print("[bold cyan]Agentic OS — Project Continuation Audit (§PCA)[/bold cyan]")
+    snapshot = create_project_snapshot(root)
+    arch, findings = run_static_discovery(root, snapshot)
+
+    baseline: ProjectBaseline | None = None
+    if dynamic:
+        console.print("[dim]Executing dynamic baseline diagnostics inside sandbox...[/dim]")
+        checks: list[BaselineCheckResult] = []
+
+        if (root / "tests").is_dir():
+            t0 = time.time()
+            res = subprocess.run(
+                ["uv", "run", "pytest", "-q"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            duration = int((time.time() - t0) * 1000)
+            status = "PASS" if res.returncode == 0 else "FAIL"
+            checks.append(
+                BaselineCheckResult(
+                    check_type=DiagnosticType.UNIT_TEST,
+                    command="uv run pytest -q",
+                    exit_code=res.returncode,
+                    duration_ms=duration,
+                    status=status,
+                    stdout_hash=str(hash(res.stdout)),
+                    stderr_hash=str(hash(res.stderr)),
+                )
+            )
+
+        baseline = ProjectBaseline(snapshot_id=snapshot.snapshot_id, checks=checks)
+
+    report = synthesize_continuation_report(
+        snapshot=snapshot,
+        architecture=arch,
+        findings=findings,
+        baseline=baseline,
+    )
+
+    pack_dir = store.save_pack(
+        project_id=project_id,
+        snapshot=snapshot,
+        architecture=arch,
+        findings=findings,
+        report=report,
+        baseline=baseline,
+    )
+
+    # Output executive layout matching §36
+    summary_table = Table(title=f"PCA Snapshot: {snapshot.repository}")
+    summary_table.add_column("Property", style="cyan")
+    summary_table.add_column("Value", style="green")
+
+    commit_str = (
+        snapshot.base_commit[:7] if len(snapshot.base_commit) >= 7 else snapshot.base_commit
+    )
+    summary_table.add_row("Base Commit", commit_str)
+    summary_table.add_row("Branch", snapshot.branch)
+    wt_clean = snapshot.working_tree.clean
+    summary_table.add_row(
+        "Working Tree",
+        "[green]CLEAN[/green]" if wt_clean else "[yellow]DIRTY[/yellow]",
+    )
+    summary_table.add_row("Total Files", str(len(snapshot.tracked_files)))
+    langs = ", ".join(f"{k} ({int(v * 100)}%)" for k, v in arch.languages.items())
+    summary_table.add_row("Stack", langs or "unspecified")
+    summary_table.add_row("Findings Count", str(len(findings)))
+    summary_table.add_row("Context Digest", (report.context_digest or "")[:16] + "...")
+    console.print(summary_table)
+
+    if findings:
+        console.print("\n[bold]Key Findings:[/bold]")
+        for f in findings[:5]:
+            color = (
+                "red" if f.severity in (FindingSeverity.BLOCKER, FindingSeverity.HIGH) else "yellow"
+            )
+            console.print(
+                f"  [{color}]{f.severity.value:<7}[/{color}] "
+                f"{f.finding_id} {f.code.value} - {f.title}"
+            )
+
+    out_file = pack_dir / "CONTINUATION_CONTEXT.md"
+    console.print(f"\n[bold green]✓ Continuation pack generated:[/bold green] {out_file}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="myagentos", description="Agentic OS CLI")
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
@@ -138,6 +310,22 @@ def main() -> None:
     # benchmark command
     subparsers.add_parser("benchmark", help="Run benchmark suite")
 
+    # continue command (§35 of PCA spec)
+    p_continue = subparsers.add_parser("continue", help="Run Project Continuation Audit")
+    p_continue.add_argument(
+        "action",
+        nargs="?",
+        default="run",
+        choices=["run", "report", "findings", "refresh"],
+        help="Action to execute",
+    )
+    p_continue.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Run dynamic diagnostics in sandbox",
+    )
+    p_continue.add_argument("--repo", default=".", help="Repository root path")
+
     args = parser.parse_args()
 
     if args.subcommand == "route":
@@ -148,6 +336,8 @@ def main() -> None:
         cmd_verify(args.job_id)
     elif args.subcommand == "benchmark":
         cmd_benchmark()
+    elif args.subcommand == "continue":
+        cmd_continue(action=args.action, repo_path=args.repo, dynamic=args.dynamic)
 
 
 if __name__ == "__main__":

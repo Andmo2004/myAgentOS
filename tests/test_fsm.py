@@ -216,3 +216,67 @@ def test_plan_obsolescence_rule(tmp_path: Path) -> None:
         protected_paths=protected_paths,
     )
     assert protected_collision is False
+
+
+def test_job_controller_continuation_flow(tmp_path: Path) -> None:
+    """Verifies FSM transitions for the Project Continuation Audit flow (§6)."""
+    store = EventStore(root_dir=tmp_path)
+    controller = JobController.create(job_id="job-pca-1", event_store=store)
+
+    assert controller.current_state == JobState.IDLE
+
+    # 1. TASK_CREATED -> ROUTING
+    state, _ = controller.transition(EventName.TASK_CREATED, EventActor.JOB_CONTROLLER)
+    assert state == JobState.ROUTING
+
+    # 2. ROUTE_SELECTED -> PROJECT_SNAPSHOT
+    state, _ = controller.transition(
+        EventName.ROUTE_SELECTED,
+        EventActor.ROUTER,
+        payload={"intent": "PROJECT_CONTINUATION"},
+    )
+    assert state == JobState.PROJECT_SNAPSHOT
+
+    # 3. PROJECT_SNAPSHOT_CREATED -> STATIC_DISCOVERY
+    state, _ = controller.transition(
+        EventName.PROJECT_SNAPSHOT_CREATED,
+        EventActor.JOB_CONTROLLER,
+    )
+    assert state == JobState.STATIC_DISCOVERY
+
+    # 4. STATIC_DISCOVERY_COMPLETED (with dynamic diagnostics) -> DYNAMIC_DIAGNOSTICS
+    state, _ = controller.transition(
+        EventName.STATIC_DISCOVERY_COMPLETED,
+        EventActor.JOB_CONTROLLER,
+        payload={"dynamic": True},
+    )
+    assert state == JobState.DYNAMIC_DIAGNOSTICS
+
+    # 5. DYNAMIC_DIAGNOSTICS_COMPLETED -> FINDING_CLASSIFICATION
+    state, _ = controller.transition(
+        EventName.DYNAMIC_DIAGNOSTICS_COMPLETED,
+        EventActor.VERIFICATION_GUARD,
+    )
+    assert state == JobState.FINDING_CLASSIFICATION
+
+    # 6. FINDING_CLASSIFIED -> CONTINUATION_SYNTHESIS
+    state, _ = controller.transition(
+        EventName.FINDING_CLASSIFIED,
+        EventActor.JOB_CONTROLLER,
+    )
+    assert state == JobState.CONTINUATION_SYNTHESIS
+
+    # 7. CONTINUATION_REPORT_CREATED -> CONTINUATION_REPORT_READY
+    state, _ = controller.transition(
+        EventName.CONTINUATION_REPORT_CREATED,
+        EventActor.CONTINUITY_ANALYST,
+    )
+    assert state == JobState.CONTINUATION_REPORT_READY
+
+    # 8. CONTINUATION_CONTEXT_VALIDATED -> COMPLETE
+    state, _ = controller.transition(
+        EventName.CONTINUATION_CONTEXT_VALIDATED,
+        EventActor.JOB_CONTROLLER,
+    )
+    assert state == JobState.COMPLETE
+    assert state.is_terminal is True

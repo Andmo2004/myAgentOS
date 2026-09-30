@@ -74,8 +74,40 @@ class LocalRouter:
                 cleaned_prompt=cleaned,
             )
 
+        if trimmed.startswith(("/continue", "/audit-project", "/onboard")):
+            cmd = next(
+                c for c in ("/continue", "/audit-project", "/onboard") if trimmed.startswith(c)
+            )
+            cleaned = trimmed[len(cmd) :].strip()
+            return RoutingDecision(
+                intent=RoutingIntent.PROJECT_CONTINUATION,
+                preliminary_risk=RiskLevel.LOW,
+                confidence=1.0,
+                matched_rule="slash_command_continuation",
+                cleaned_prompt=cleaned,
+            )
+
         # 2. Heuristics based on text keywords and query structure
         risk = self._detect_preliminary_risk(trimmed)
+
+        # Continuation audit heuristics (§3 of PCA spec)
+        continuation_keywords = [
+            "audit project",
+            "project continuation",
+            "analiza este proyecto",
+            "cómo continuar",
+            "explícame su estado",
+            "revisa lo que ya existe",
+            "onboard to repo",
+        ]
+        if any(kw in trimmed.lower() for kw in continuation_keywords):
+            return RoutingDecision(
+                intent=RoutingIntent.PROJECT_CONTINUATION,
+                preliminary_risk=RiskLevel.LOW,
+                confidence=0.90,
+                matched_rule="heuristic_project_continuation",
+                cleaned_prompt=trimmed,
+            )
 
         # Research intent heuristics
         research_keywords = ["investigate", "benchmark", "state of the art", "compare libraries"]

@@ -49,10 +49,45 @@ class TransitionTable:
                     return JobState.DOC_LOOKUP_RUN
                 if intent == "DEEP_RESEARCH":
                     return JobState.RESEARCH_RUN
+                if intent == "PROJECT_CONTINUATION":
+                    return JobState.PROJECT_SNAPSHOT
                 return JobState.DATA_CLASSIFY
 
         elif current_state in (JobState.DOC_LOOKUP_RUN, JobState.RESEARCH_RUN):
             if event_name in (EventName.JOB_COMPLETED, EventName.VERIFICATION_COMPLETED):
+                return JobState.COMPLETE
+
+        # Project Continuation Audit (PCA) transitions (§6.1, §6.2)
+        elif current_state == JobState.PROJECT_SNAPSHOT:
+            if event_name == EventName.PROJECT_SNAPSHOT_CREATED:
+                return JobState.STATIC_DISCOVERY
+
+        elif current_state == JobState.STATIC_DISCOVERY:
+            if event_name == EventName.STATIC_DISCOVERY_COMPLETED:
+                if payload.get("dynamic", False):
+                    return JobState.DYNAMIC_DIAGNOSTICS
+                return JobState.FINDING_CLASSIFICATION
+
+        elif current_state == JobState.DYNAMIC_DIAGNOSTICS:
+            if event_name == EventName.DYNAMIC_DIAGNOSTICS_COMPLETED:
+                return JobState.FINDING_CLASSIFICATION
+
+        elif current_state == JobState.FINDING_CLASSIFICATION:
+            if event_name in (
+                EventName.FINDING_CLASSIFIED,
+                EventName.CONTINUATION_SYNTHESIS_STARTED,
+            ):
+                return JobState.CONTINUATION_SYNTHESIS
+
+        elif current_state == JobState.CONTINUATION_SYNTHESIS:
+            if event_name == EventName.CONTINUATION_REPORT_CREATED:
+                return JobState.CONTINUATION_REPORT_READY
+
+        elif current_state == JobState.CONTINUATION_REPORT_READY:
+            if event_name in (
+                EventName.JOB_COMPLETED,
+                EventName.CONTINUATION_CONTEXT_VALIDATED,
+            ):
                 return JobState.COMPLETE
 
         elif current_state == JobState.DATA_CLASSIFY:
