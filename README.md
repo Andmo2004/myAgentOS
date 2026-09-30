@@ -415,6 +415,7 @@ Para profundizar en la arquitectura, la formalización matemática y los procedi
 
 | Documento | Descripción |
 |---|---|
+| [`docs/user-manual.md`](docs/user-manual.md) | **Manual de Usuario:** Instalación, configuración de claves API, referencia completa de todos los comandos slash de Mya, atajos de teclado y preguntas frecuentes. **Punto de entrada recomendado para nuevos usuarios.** |
 | [`docs/specification.md`](docs/specification.md) | **Especificación Técnica Maestra (v2.1):** Arquitectura completa, estados de la FSM, sandboxing en 4 zonas, protocolo de parches y gobierno determinista. |
 | [`docs/architecture.md`](docs/architecture.md) | **Arquitectura y Modelo de Amenazas:** Diagramas de aislamiento de zonas, transiciones de ciclo de vida, Capability Tokens, cadena criptográfica SHA-256 y matriz de mitigación de ataques. |
 | [`docs/cli-reference.md`](docs/cli-reference.md) | **Manual de Referencia CLI:** Sintaxis, opciones, flags, códigos de salida y directorios de persistencia para todos los comandos de `myagentos`. |
