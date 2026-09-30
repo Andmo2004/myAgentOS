@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Mya — Agentic OS Interactive Terminal Interface
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$DIR/.venv/bin/mya" ]; then
+    exec "$DIR/.venv/bin/mya" "$@"
+else
+    exec python3 -m myagentos.ui.app "$@"
+fi

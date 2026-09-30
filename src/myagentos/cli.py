@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from myagentos.benchmark import BenchmarkHarness, BenchmarkTask
+from myagentos.categorization import ProjectCategorizationService
 from myagentos.core.models.risk import RiskLevel
 from myagentos.core.store.event_store import EventStore
 from myagentos.core.store.state_projector import StateProjector
@@ -454,9 +455,83 @@ def cmd_run(
         sys.exit(1)
 
 
+def cmd_categorize(repo_path: str = ".", force: bool = False, json_output: bool = False) -> None:
+    root = Path(repo_path).resolve()
+    service = ProjectCategorizationService()
+    profile = service.scan_project(root, force=force)
+
+    if json_output:
+        console.print(profile.model_dump_json(indent=2))
+        return
+
+    table = Table(title=f"Project Profile: {profile.repository} ({profile.status.value.upper()})")
+    table.add_column("Property", style="cyan", no_wrap=True)
+    table.add_column("Value", style="green")
+
+    tags_str = " ".join(f"[{t.label}]" for t in profile.visible_tags)
+    table.add_row("Visible Tags (UX)", f"[bold magenta]{tags_str}[/bold magenta]")
+    table.add_row("Languages", ", ".join(profile.stack.languages) or "N/A")
+    table.add_row("Frameworks", ", ".join(profile.stack.frameworks) or "none")
+    table.add_row("Databases", ", ".join(profile.stack.databases) or "none")
+    table.add_row("Application Type", ", ".join(profile.architecture.application_type) or "N/A")
+    table.add_row("Containers", ", ".join(profile.infrastructure.containers) or "none")
+    table.add_row("CI/CD", ", ".join(profile.infrastructure.ci_cd) or "none")
+    table.add_row(
+        "Quality",
+        f"Tests: {', '.join(profile.quality.test_frameworks) or 'none'} | "
+        f"Typing: {'✓' if profile.quality.typechecking else '✗'} | "
+        f"Linting: {'✓' if profile.quality.linting else '✗'}",
+    )
+    table.add_row("Scan Hash", profile.scan_hash[:16] + "...")
+
+    console.print(table)
+
+
+def cmd_project(
+    action: str,
+    project_id: str | None = None,
+    repo_path: str = ".",
+    json_output: bool = False,
+    force: bool = False,
+) -> None:
+    root = Path(repo_path).resolve()
+    service = ProjectCategorizationService()
+
+    if action == "categorize":
+        cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
+        return
+
+    profile = service.scan_project(root, project_id=project_id, force=force)
+
+    if json_output:
+        console.print(profile.model_dump_json(indent=2))
+        return
+
+    if action == "tags":
+        table = Table(title=f"Visible Tags: {profile.repository}")
+        table.add_column("Tag", style="bold magenta")
+        table.add_column("Category", style="cyan")
+        table.add_column("Confidence", style="green")
+        table.add_column("Source", style="yellow")
+        table.add_column("Pinned", style="blue")
+
+        for tag in profile.visible_tags:
+            table.add_row(
+                tag.label,
+                tag.category.value,
+                f"{tag.confidence:.2f}",
+                tag.source.value,
+                "✓" if tag.pinned else "",
+            )
+        console.print(table)
+        return
+
+    cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="myagentos", description="Agentic OS CLI")
-    subparsers = parser.add_subparsers(dest="subcommand", required=True)
+    subparsers = parser.add_subparsers(dest="subcommand", required=False)
 
     # run command (§8 E2E execution)
     p_run = subparsers.add_parser("run", help="Run autonomous code task end-to-end")
@@ -521,7 +596,31 @@ def main() -> None:
     )
     p_continue.add_argument("--repo", default=".", help="Repository root path")
 
+    # categorize command (§21)
+    p_categorize = subparsers.add_parser("categorize", help="Scan and categorize project (§21)")
+    p_categorize.add_argument("--repo", default=".", help="Repository root path")
+    p_categorize.add_argument("--force", action="store_true", help="Force re-scan")
+    p_categorize.add_argument("--json", action="store_true", help="Output JSON profile")
+
+    # project command (§21)
+    p_proj = subparsers.add_parser("project", help="Manage project profile and tags (§21)")
+    p_proj.add_argument(
+        "action",
+        choices=["categorize", "profile", "tags"],
+        help="Action to execute",
+    )
+    p_proj.add_argument("project_id", nargs="?", default=None, help="Optional project ID")
+    p_proj.add_argument("--repo", default=".", help="Repository root path")
+    p_proj.add_argument("--force", action="store_true", help="Force re-scan")
+    p_proj.add_argument("--json", action="store_true", help="Output as JSON")
+
     args = parser.parse_args()
+
+    if args.subcommand is None:
+        from myagentos.ui.app import run as run_mya
+
+        run_mya()
+        return
 
     if args.subcommand == "run":
         cmd_run(
@@ -545,6 +644,16 @@ def main() -> None:
         )
     elif args.subcommand == "continue":
         cmd_continue(action=args.action, repo_path=args.repo, dynamic=args.dynamic)
+    elif args.subcommand == "categorize":
+        cmd_categorize(repo_path=args.repo, force=args.force, json_output=args.json)
+    elif args.subcommand == "project":
+        cmd_project(
+            action=args.action,
+            project_id=args.project_id,
+            repo_path=args.repo,
+            json_output=args.json,
+            force=args.force,
+        )
 
 
 if __name__ == "__main__":
