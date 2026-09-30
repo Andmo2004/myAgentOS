@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from textual import on
+from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Footer, Header, Input, Static
 
 from myagentos.gateway.client import ModelGateway
@@ -144,14 +144,18 @@ class MyaApp(App[None]):
 
     #conversation {
         height: 1fr;
-        margin: 0 2;
+        margin: 0 1;
         padding: 0 1;
         scrollbar-size: 1 1;
     }
 
+    #bottom-dock {
+        dock: bottom;
+        height: auto;
+    }
+
     #status-bar {
         height: 1;
-        dock: bottom;
         background: $surface;
         color: $text-muted;
         padding: 0 2;
@@ -159,8 +163,14 @@ class MyaApp(App[None]):
 
     #prompt-container {
         height: 3;
-        dock: bottom;
-        padding: 0 2;
+        padding: 0 1;
+    }
+
+    #prompt-label {
+        width: auto;
+        height: 3;
+        content-align: center middle;
+        padding-right: 1;
     }
 
     #prompt-input {
@@ -208,22 +218,30 @@ class MyaApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield WelcomePanel(self.session, id="welcome")
-        yield VerticalScroll(id="conversation")
-        yield Static(self._render_status_bar(), id="status-bar")
-        with Horizontal(id="prompt-container"):
-            yield Static(
-                f"[bold {Colors.PRIMARY}]{Icons.PROMPT}[/bold {Colors.PRIMARY}] ",
-                id="prompt-label",
-            )
-            yield Input(
-                placeholder="Describe what you need...",
-                id="prompt-input",
-            )
-        yield Footer()
+        with VerticalScroll(id="conversation", can_focus=False):
+            yield WelcomePanel(self.session, id="welcome")
+        with Vertical(id="bottom-dock"):
+            yield Static(self._render_status_bar(), id="status-bar")
+            with Horizontal(id="prompt-container"):
+                yield Static(
+                    f"[bold {Colors.PRIMARY}]{Icons.PROMPT}[/bold {Colors.PRIMARY}]",
+                    id="prompt-label",
+                )
+                yield Input(
+                    placeholder="Describe what you need...",
+                    id="prompt-input",
+                )
+            yield Footer()
 
     def on_mount(self) -> None:
         """Focus the input prompt on startup."""
+        self.query_one("#prompt-input", Input).focus()
+
+    @on(events.Click, "#prompt-container")
+    @on(events.Click, "#prompt-label")
+    @on(events.Click, "#status-bar")
+    def _on_bottom_bar_click(self) -> None:
+        """Ensure input prompt gets focused when clicking prompt bar, icon, or status bar."""
         self.query_one("#prompt-input", Input).focus()
 
     @on(Input.Submitted, "#prompt-input")
@@ -259,7 +277,9 @@ class MyaApp(App[None]):
 
             case SlashCommandKind.CLEAR:
                 conv = self.query_one("#conversation", VerticalScroll)
-                await conv.remove_children()
+                for child in list(conv.children):
+                    if child.id != "welcome":
+                        await child.remove()
 
             case SlashCommandKind.STATUS:
                 self._show_status()
