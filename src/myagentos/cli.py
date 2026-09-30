@@ -11,6 +11,7 @@ from myagentos.benchmark import BenchmarkHarness, BenchmarkTask
 from myagentos.core.models.risk import RiskLevel
 from myagentos.core.store.event_store import EventStore
 from myagentos.core.store.state_projector import StateProjector
+from myagentos.pipeline import PipelineConfig, PipelineOrchestrator
 from myagentos.router.models import RoutingIntent
 from myagentos.router.rules import LocalRouter
 
@@ -291,9 +292,63 @@ def cmd_continue(
     console.print(f"\n[bold green]✓ Continuation pack generated:[/bold green] {out_file}\n")
 
 
+def cmd_run(
+    prompt: str,
+    repo_path: str = ".",
+    auto_approve: bool = False,
+    model_id: str = "mock",
+) -> None:
+    root = Path(repo_path).resolve()
+    console.print("[bold cyan]myagentos — Executing Autonomous Pipeline (§8)[/bold cyan]")
+    console.print(f"Target Repository: [green]{root}[/green]")
+    console.print(f"Task Prompt: [magenta]{prompt}[/magenta]\n")
+
+    config = PipelineConfig(
+        repo_root=root,
+        model_id=model_id,
+        auto_approve=auto_approve,
+        use_worktree=True,
+    )
+    orchestrator = PipelineOrchestrator(config=config)
+    result = orchestrator.run(prompt)
+
+    table = Table(title=f"Pipeline Execution Summary: {result.job_id}")
+    table.add_column("Stage / Property", style="cyan")
+    table.add_column("Result", style="green" if result.success else "red")
+
+    table.add_row("Status", "SUCCESS" if result.success else "FAILED")
+    table.add_row("Final FSM State", result.final_state.value)
+    table.add_row("Routing Intent", result.intent)
+    if result.plan:
+        targets = ", ".join(result.plan.all_targeted_paths()) or "none"
+        table.add_row("Plan Targets", targets)
+        table.add_row("Preliminary Risk", result.plan.preliminary_risk.value)
+    if result.patch_set:
+        table.add_row("Modified Files", str(result.patch_set.total_files))
+        table.add_row("Diff Lines", str(result.patch_set.total_diff_lines))
+    table.add_row("Audit Events", str(result.audit_events_count))
+    table.add_row(
+        "Cryptographic Hash Chain",
+        "INTACT ✓" if result.hash_chain_intact else "CORRUPTED ✗",
+    )
+    table.add_row("Duration", f"{result.duration_seconds:.2f}s")
+    table.add_row("Summary", result.summary)
+
+    console.print(table)
+    if not result.success:
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="myagentos", description="Agentic OS CLI")
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
+
+    # run command (§8 E2E execution)
+    p_run = subparsers.add_parser("run", help="Run autonomous code task end-to-end")
+    p_run.add_argument("prompt", help="Task prompt or goal description")
+    p_run.add_argument("--repo", default=".", help="Repository root path")
+    p_run.add_argument("--auto-approve", action="store_true", help="Auto-approve plan and diff")
+    p_run.add_argument("--model", default="mock", help="Model ID for Planner and Worker")
 
     # route command
     p_route = subparsers.add_parser("route", help="Route prompt locally")
@@ -328,7 +383,14 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.subcommand == "route":
+    if args.subcommand == "run":
+        cmd_run(
+            prompt=args.prompt,
+            repo_path=args.repo,
+            auto_approve=args.auto_approve,
+            model_id=args.model,
+        )
+    elif args.subcommand == "route":
         cmd_route(args.prompt)
     elif args.subcommand == "status":
         cmd_status(args.job_id)
