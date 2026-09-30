@@ -6,6 +6,8 @@ from pathlib import Path
 
 from myagentos.context.extractor import StructuralExtractor
 from myagentos.context.models import RepositoryMap
+from myagentos.context.security import classify_path_and_content
+from myagentos.core.models.data_policy import DataClassification
 
 IGNORED_DIRS = {
     ".git",
@@ -61,6 +63,10 @@ class DependencyClosureAnalyzer:
                 rel_f_path = (rel_root / f).as_posix()
                 if rel_f_path.startswith("./"):
                     rel_f_path = rel_f_path[2:]
+
+                # Omit classified secret files from repository structural map (§18, AUD-018)
+                if classify_path_and_content(rel_f_path) == DataClassification.SECRET:
+                    continue
 
                 if len(tree_lines) < max_tree_lines:
                     tree_lines.append(f"{indent}  📄 {f}")

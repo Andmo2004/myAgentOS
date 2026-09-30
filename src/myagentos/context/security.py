@@ -32,7 +32,7 @@ SECRET_CONTENT_PATTERNS = [
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS Access Key
     re.compile(r"ghp_[0-9a-zA-Z]{36}"),  # GitHub PAT
     re.compile(r"AIza[0-9A-Za-z-_]{35}"),  # Google API key
-    re.compile(r"sk-[a-zA-Z0-9]{32,}"),  # OpenAI-like API key
+    re.compile(r"sk-(?:live-|proj-)?[a-zA-Z0-9_-]{20,}"),  # OpenAI-like API key
 ]
 
 

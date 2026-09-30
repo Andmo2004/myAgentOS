@@ -9,6 +9,13 @@ from myagentos.core.models.failure import (
     FailureRecord,
     FailureRule,
 )
+from myagentos.core.models.knowledge import (
+    CuratorInput,
+    CuratorResult,
+    NoteProvenance,
+    NoteStatus,
+    ProjectNote,
+)
 from myagentos.core.models.patch import FilePatch, PatchOperation, PatchSet
 from myagentos.core.models.plan import MicroPlan, PlanApproval, PlanSpec
 from myagentos.core.models.review import (
@@ -59,4 +66,9 @@ __all__ = [
     "ReviewSpec",
     "ReviewResult",
     "DiffApproval",
+    "NoteStatus",
+    "NoteProvenance",
+    "ProjectNote",
+    "CuratorInput",
+    "CuratorResult",
 ]

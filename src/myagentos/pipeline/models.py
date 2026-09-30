@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from myagentos.core.models.knowledge import ProjectNote
 from myagentos.core.models.patch import PatchSet
 from myagentos.core.models.plan import PlanApproval, PlanSpec
 from myagentos.core.models.review import DiffApproval, ReviewResult
@@ -21,6 +22,7 @@ class PipelineConfig(BaseModel):
     repo_root: Path
     model_id: str = "mock"
     reviewer_model_id: str | None = None
+    curator_model_id: str | None = None
     auto_approve: bool = False
     use_worktree: bool = True
     max_steps: int = 12
@@ -43,6 +45,7 @@ class PipelineResult(BaseModel):
     verification: VerificationResult | None = None
     review: ReviewResult | None = None
     diff_approval: DiffApproval | None = None
+    notes: list[ProjectNote] = Field(default_factory=list)
     audit_events_count: int = 0
     hash_chain_intact: bool = True
     duration_seconds: float = 0.0

@@ -226,7 +226,11 @@ class TransitionTable:
                 EventName.JOB_FAILED,
             ):
                 return JobState.COMPLETE
-            if event_name in (EventName.NOTE_PROPOSED, EventName.NOTE_VALIDATED):
+            if event_name in (
+                EventName.NOTE_PROPOSED,
+                EventName.NOTE_VALIDATED,
+                EventName.KNOWLEDGE_UPDATE_STARTED,
+            ):
                 return JobState.KNOWLEDGE_UPDATE
 
         raise StateTransitionError(

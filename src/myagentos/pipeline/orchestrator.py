@@ -3,6 +3,7 @@
 Follows §8, §9, §10, and §13.
 """
 
+import logging
 import shutil
 import subprocess
 import time
@@ -13,11 +14,13 @@ from typing import Any
 from myagentos.context.compiler import ContextCompiler
 from myagentos.core.models.event import EventActor, EventName
 from myagentos.core.models.failure import FailureCode, ObservedFailure
+from myagentos.core.models.knowledge import CuratorInput, ProjectNote
 from myagentos.core.models.patch import PatchSet
 from myagentos.core.models.plan import PlanSpec
 from myagentos.core.models.review import DiffApproval, ReviewResult, ReviewSpec
 from myagentos.core.models.risk import RiskLevel
 from myagentos.core.store.event_store import EventStore
+from myagentos.curator import CuratorAgent
 from myagentos.failure.healing import HealingCoordinator
 from myagentos.fsm.controller import JobController
 from myagentos.fsm.states import JobState
@@ -37,6 +40,8 @@ from myagentos.worker.loop import WorkerLoop
 from myagentos.worktree.manager import WorktreeManager
 from myagentos.worktree.patch_applier import apply_patch_set
 
+logger = logging.getLogger(__name__)
+
 
 class PipelineOrchestrator:
     """Executes the canonical, governance-bounded Agentic OS workflow (§8)."""
@@ -51,6 +56,7 @@ class PipelineOrchestrator:
         healing_coordinator: HealingCoordinator | None = None,
         independent_reviewer: IndependentReviewer | None = None,
         diff_approval_manager: DiffApprovalManager | None = None,
+        curator_agent: CuratorAgent | None = None,
     ) -> None:
         self.config = config
         self.repo_root = config.repo_root.resolve()
@@ -64,6 +70,11 @@ class PipelineOrchestrator:
             gateway=self.gateway
         )
         self.diff_approval_manager = diff_approval_manager or DiffApprovalManager()
+        self.curator_agent = curator_agent or CuratorAgent(
+            repo_root=self.repo_root,
+            gateway=self.gateway,
+            model_id=self.config.curator_model_id or "mock",
+        )
 
         self.router = LocalRouter()
         self.context_compiler = ContextCompiler(
@@ -440,13 +451,46 @@ class PipelineOrchestrator:
             controller.transition(EventName.MERGE_COMPLETED, EventActor.MERGE_CONTROLLER)
             controller.transition(EventName.MERGE_COMPLETED, EventActor.MERGE_CONTROLLER)
 
-            # 12. Knowledge Update & Complete
-            self.context_compiler.compile_knowledge_context(
+            # 12. Knowledge Update & Complete (§22)
+            knowledge_ctx = self.context_compiler.compile_knowledge_context(
                 job_id=job_id,
                 patch_set=patch_set,
                 base_commit=base_commit,
             )
-            controller.transition(EventName.JOB_COMPLETED, EventActor.JOB_CONTROLLER)
+
+            curator_notes: list[ProjectNote] = []
+            try:
+                curator_input = CuratorInput(
+                    job_id=job_id,
+                    project_id=self.repo_root.name,
+                    patch_set=patch_set,
+                    plan=plan,
+                    verification=verification_res,
+                    base_commit=base_commit,
+                    extracted_facts=knowledge_ctx,
+                )
+                curator_res = self.curator_agent.curate_knowledge(curator_input)
+                curator_notes = curator_res.notes
+
+                for note in curator_notes:
+                    controller.transition(
+                        EventName.NOTE_PROPOSED,
+                        EventActor.CURATOR,
+                        payload={"note_id": note.note_id, "anchors": note.anchors},
+                    )
+                    controller.transition(
+                        EventName.NOTE_VALIDATED,
+                        EventActor.CURATOR,
+                        payload={"note_id": note.note_id, "status": note.status.value},
+                    )
+            except Exception as e:
+                logger.warning("Knowledge curation encountered non-fatal error: %s", e)
+
+            controller.transition(
+                EventName.KNOWLEDGE_UPDATE_COMPLETED,
+                EventActor.CURATOR,
+                payload={"notes_count": len(curator_notes)},
+            )
 
             return self._build_result(
                 job_id=job_id,
@@ -459,6 +503,7 @@ class PipelineOrchestrator:
                 verification=verification_res,
                 review=review_res,
                 diff_approval=diff_approval,
+                notes=curator_notes,
                 summary=(
                     f"Successfully applied {patch_set.total_files} file changes "
                     f"({patch_set.total_diff_lines} lines)"
@@ -549,6 +594,7 @@ class PipelineOrchestrator:
         verification: VerificationResult | None = None,
         review: ReviewResult | None = None,
         diff_approval: DiffApproval | None = None,
+        notes: list[ProjectNote] | None = None,
         summary: str = "",
     ) -> PipelineResult:
         chain_ok, _ = self.event_store.verify_integrity(job_id)
@@ -565,6 +611,7 @@ class PipelineOrchestrator:
             verification=verification,
             review=review,
             diff_approval=diff_approval,
+            notes=notes or [],
             audit_events_count=len(events),
             hash_chain_intact=chain_ok,
             duration_seconds=duration_seconds,

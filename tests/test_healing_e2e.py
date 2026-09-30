@@ -156,7 +156,7 @@ def test_pipeline_self_healing_retry_success(
     assert "FAILURE_CLASSIFIED" in event_names
     assert "RETRY_SCHEDULED" in event_names
     assert "MERGE_COMPLETED" in event_names
-    assert "JOB_COMPLETED" in event_names
+    assert "KNOWLEDGE_UPDATE_COMPLETED" in event_names
 
 
 def test_pipeline_stagnation_detection_escalates(
