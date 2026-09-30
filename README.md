@@ -6,7 +6,7 @@
 [![Tests: Pytest](https://img.shields.io/badge/tests-133%20passed-brightgreen.svg)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
-**myagentos** es una implementación canónica y de grado de producción de un **Sistema Operativo Agéntico para Ingeniería de Software**, gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/agentic-os-v2.1.md`](docs/agentic-os-v2.1.md).
+**myagentos** es una implementación canónica y de grado de producción de un **Sistema Operativo Agéntico para Ingeniería de Software**, gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/specification.md`](docs/specification.md).
 
 A diferencia de los asistentes de código tradicionales que confían ciegamente en salidas no acotadas de Modelos de Lenguaje (LLMs), **myagentos** opera bajo una premisa fundamental:
 > **El LLM propone; los componentes deterministas del sistema deciden y ejecutan.**
@@ -250,8 +250,23 @@ myAgentOS/
 │   ├── worktree/            # Gestor de git worktrees efímeros y MergeController serializado (§11, §16)
 │   └── cli.py               # Punto de entrada unificado de comandos de consola
 ├── tests/                   # 31 suites de pruebas automatizadas unitarias, de integración y adversariales
-└── docs/                    # Especificación arquitectónica v2.1 y auditorías formales
+└── docs/                    # Especificación formal, arquitectura, manual CLI y benchmarks
 ```
+
+---
+
+## Documentación Formal
+
+Para profundizar en la arquitectura, la formalización matemática y los procedimientos de auditoría, consulte los documentos canónicos en el directorio [`docs/`](docs/):
+
+| Documento | Descripción |
+|---|---|
+| [`docs/specification.md`](docs/specification.md) | **Especificación Técnica Maestra (v2.1):** Arquitectura completa, estados de la FSM, sandboxing en 4 zonas, protocolo de parches y gobierno determinista. |
+| [`docs/architecture.md`](docs/architecture.md) | **Arquitectura y Modelo de Amenazas:** Diagramas de aislamiento de zonas, transiciones de ciclo de vida, Capability Tokens, cadena criptográfica SHA-256 y matriz de mitigación de ataques. |
+| [`docs/cli-reference.md`](docs/cli-reference.md) | **Manual de Referencia CLI:** Sintaxis, opciones, flags, códigos de salida y directorios de persistencia para todos los comandos de `myagentos`. |
+| [`docs/benchmark-guide.md`](docs/benchmark-guide.md) | **Guía de Benchmark Empírico:** Metodología científica, métricas clave (§26), dataset estratificado en 5 categorías y comparación observable frente al agente baseline. |
+| [`docs/technical-audit.md`](docs/technical-audit.md) | **Auditoría Técnica y Cumplimiento:** Análisis de discrepancias previas, tabla de hallazgos normativos y matriz de resolución de incidentes de seguridad. |
+| [`docs/continuity-specification.md`](docs/continuity-specification.md) | **Auditoría de Continuidad de Proyectos (PCA):** Diagnóstico estático y dinámico de repositorios en transición, detección de deudas ocultas y síntesis de contexto. |
 
 ---
 
