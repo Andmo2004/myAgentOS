@@ -22,11 +22,12 @@ class LocalRouter:
     def route(self, prompt: str) -> RoutingDecision:
         trimmed = prompt.strip()
 
-        # 1. Slash commands matching (§6)
-        if trimmed.startswith("/direct"):
-            cleaned = trimmed[len("/direct") :].strip()
+        # 1. Slash commands matching (§6, §19 of mya-commands)
+        if trimmed.startswith(("/direct", "/fast")):
+            cmd = "/fast" if trimmed.startswith("/fast") else "/direct"
+            cleaned = trimmed[len(cmd) :].strip()
             risk = self._detect_preliminary_risk(cleaned)
-            # False-direct prevention: if risk is MEDIUM+, escalate to PLANNED_CODE (§5.4)
+            # False-direct prevention: if risk is MEDIUM+, escalate to PLANNED_CODE (§5.4, §12)
             if risk >= RiskLevel.MEDIUM:
                 return RoutingDecision(
                     intent=RoutingIntent.PLANNED_CODE,
@@ -39,7 +40,7 @@ class LocalRouter:
                 intent=RoutingIntent.DIRECT_WORKER_CODE,
                 preliminary_risk=RiskLevel.LOW,
                 confidence=1.0,
-                matched_rule="slash_command_direct",
+                matched_rule="slash_command_fast" if cmd == "/fast" else "slash_command_direct",
                 cleaned_prompt=cleaned,
             )
 
@@ -54,13 +55,39 @@ class LocalRouter:
                 cleaned_prompt=cleaned,
             )
 
-        if trimmed.startswith("/research"):
-            cleaned = trimmed[len("/research") :].strip()
+        if trimmed.startswith(("/research", "/deep_research")):
+            cmd = "/deep_research" if trimmed.startswith("/deep_research") else "/research"
+            cleaned = trimmed[len(cmd) :].strip()
             return RoutingDecision(
                 intent=RoutingIntent.DEEP_RESEARCH,
                 preliminary_risk=RiskLevel.LOW,
                 confidence=1.0,
-                matched_rule="slash_command_research",
+                matched_rule="slash_command_deep_research",
+                cleaned_prompt=cleaned,
+            )
+
+        if trimmed.startswith("/sci_mode"):
+            cleaned = trimmed[len("/sci_mode") :].strip()
+            return RoutingDecision(
+                intent=RoutingIntent.DEEP_RESEARCH,
+                preliminary_risk=RiskLevel.LOW,
+                confidence=1.0,
+                matched_rule="slash_command_sci_mode",
+                cleaned_prompt=cleaned,
+            )
+
+        if trimmed.startswith(("/optimize", "/security", "/cloud")):
+            spec_cmd = next(
+                c for c in ("/optimize", "/security", "/cloud") if trimmed.startswith(c)
+            )
+            cleaned = trimmed[len(spec_cmd) :].strip()
+            risk = self._detect_preliminary_risk(cleaned)
+            min_risk = RiskLevel.MEDIUM if spec_cmd == "/security" else RiskLevel.LOW
+            return RoutingDecision(
+                intent=RoutingIntent.PLANNED_CODE,
+                preliminary_risk=max(risk, min_risk),
+                confidence=1.0,
+                matched_rule=f"slash_command_{spec_cmd.lstrip('/')}",
                 cleaned_prompt=cleaned,
             )
 
@@ -175,6 +202,8 @@ class LocalRouter:
             "ci/cd",
             ".github/workflows",
             "production deploy",
+            "production",
+            "drop table",
         ]
         if any(kw in lower for kw in critical_keywords):
             return RiskLevel.CRITICAL

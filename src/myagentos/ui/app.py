@@ -18,6 +18,11 @@ from textual.widgets import Footer, Header, Input, Static
 
 from myagentos.gateway.client import ModelGateway
 from myagentos.mya.agent import MyaAgent
+from myagentos.mya.commands import (
+    CommandHandlerService,
+    ObservabilityService,
+    format_command_badge,
+)
 from myagentos.ui.commands import (
     ParsedCommand,
     SlashCommandKind,
@@ -31,23 +36,25 @@ HELP_TEXT = """\
 [bold cyan]Talk naturally:[/bold cyan]
   "añade autenticación"
   "arregla los tests"
-  "continúa este proyecto"
   "muéstrame mis proyectos"
 
-[bold cyan]Commands:[/bold cyan]
-  /projects    project explorer & management
-  /status      project status
-  /categorize  scan & profile project
-  /jobs        active jobs
-  /diff        view diff
-  /cancel      cancel current job
-  /help        this help
-  /exit        exit mya
+[bold cyan]Observability:[/bold cyan]
+  /info         session & token budget 🟢
+  /telemetry    agent activity & usage 🟢
+  /monitor      live agent & file status 🟢
+  /status       git & project status
+  /projects     project explorer (Ctrl+P)
 
-[bold cyan]Advanced:[/bold cyan]
-  /model     model configuration
-  /usage     token and cost usage
-  /debug     internal state
+[bold cyan]Working Modes & Research:[/bold cyan]
+  /fast <prompt>         fast path, low overhead 🟢
+  /sci_mode <prompt>     scientific analysis 🟡
+  /deep_research <query> exhaustive research (no code change) 🔴
+  /optimize <target>     performance review (no auto change) 🟡
+
+[bold cyan]Decision & Expertise:[/bold cyan]
+  /decision <question>   5 independent perspectives 🟠
+  /cloud <prompt>        cloud architecture & IAM 🟡
+  /security <prompt>     cybersecurity & OWASP audit 🟡
 """
 
 
@@ -276,6 +283,55 @@ class MyaApp(App[None]):
             case SlashCommandKind.PROJECTS:
                 self.action_open_projects()
 
+            case SlashCommandKind.INFO:
+                obs = ObservabilityService()
+                self._append_mya_message(obs.render_info(self.session))
+
+            case SlashCommandKind.TELEMETRY:
+                obs = ObservabilityService()
+                self._append_mya_message(obs.render_telemetry(self.session.current_job_id))
+
+            case SlashCommandKind.MONITOR:
+                obs = ObservabilityService()
+                self._append_mya_message(
+                    obs.render_monitor(self.session.current_job_id, self.session)
+                )
+
+            case SlashCommandKind.FAST:
+                handler = CommandHandlerService()
+                _, msg = handler.handle_fast(cmd.argument)
+                self._append_mya_message(msg)
+
+            case SlashCommandKind.SCI_MODE:
+                handler = CommandHandlerService()
+                res = handler.handle_sci_mode(cmd.argument)
+                self._append_mya_message(res)
+
+            case SlashCommandKind.DEEP_RESEARCH:
+                handler = CommandHandlerService()
+                res = handler.handle_deep_research(cmd.argument)
+                self._append_mya_message(res)
+
+            case SlashCommandKind.OPTIMIZE:
+                handler = CommandHandlerService()
+                res = handler.handle_optimize(cmd.argument)
+                self._append_mya_message(res)
+
+            case SlashCommandKind.DECISION:
+                handler = CommandHandlerService()
+                res = handler.handle_decision(cmd.argument)
+                self._append_mya_message(res)
+
+            case SlashCommandKind.CLOUD:
+                handler = CommandHandlerService()
+                res = handler.handle_cloud(cmd.argument)
+                self._append_mya_message(res)
+
+            case SlashCommandKind.SECURITY:
+                handler = CommandHandlerService()
+                res = handler.handle_security(cmd.argument)
+                self._append_mya_message(res)
+
             case SlashCommandKind.NATURAL | SlashCommandKind.MYA:
                 prompt = cmd.argument if cmd.kind == SlashCommandKind.MYA else cmd.raw_input
                 await self._handle_natural_input(prompt.strip())
@@ -383,10 +439,18 @@ class MyaApp(App[None]):
         self._append_mya_message("\n".join(lines))
 
     def _append_user_message(self, text: str) -> None:
-        """Add a user message to the conversation."""
+        """Add a user message to the conversation with category badge styling for commands."""
         conv = self.query_one("#conversation", VerticalScroll)
+        formatted_text = text
+        if text.strip().startswith("/"):
+            parts = text.strip().split(maxsplit=1)
+            cmd_part = parts[0]
+            arg_part = f" {parts[1]}" if len(parts) > 1 else ""
+            badge = format_command_badge(cmd_part)
+            formatted_text = f"{badge}{arg_part}"
+
         msg = Static(
-            f"[bold]{Icons.PROMPT}[/bold] {text}",
+            f"[bold]{Icons.PROMPT}[/bold] {formatted_text}",
             classes="user-message",
         )
         conv.mount(msg)

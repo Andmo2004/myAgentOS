@@ -628,7 +628,8 @@ def cmd_project(
         if sub == "purge":
             if not confirm:
                 console.print(
-                    f"[bold red]Permanently delete registration for '{target_proj.name}'?[/bold red]\n"
+                    f"[bold red]Permanently delete registration for '{target_proj.name}'?"
+                    "[/bold red]\n"
                     "This removes project registration and Mya memory association.\n"
                     "The repository code on disk will NOT be deleted.\n"
                     "Pass [bold]--confirm[/bold] to proceed."
@@ -636,7 +637,8 @@ def cmd_project(
                 sys.exit(1)
             mgr.delete_permanently(target_proj.project_id, confirm=True)
             console.print(
-                f"[bold red]✓ Permanently deleted registration for '{target_proj.name}'.[/bold red]\n"
+                f"[bold red]✓ Permanently deleted registration for '{target_proj.name}'."
+                "[/bold red]\n"
                 f"  [dim]Repository files at '{target_proj.path}' were NOT deleted.[/dim]"
             )
             return
@@ -670,6 +672,63 @@ def cmd_project(
             console.print(table)
             return
         cmd_categorize(repo_path=repo_path, force=force, json_output=json_output)
+
+
+def cmd_mya(
+    command: str | None = None,
+    argument: str = "",
+    repo_path: str = ".",
+) -> None:
+    """Executes a single Mya command or launches the interactive terminal (§24)."""
+    if command is None:
+        from myagentos.ui.app import run as run_mya
+
+        run_mya(repo_path=repo_path)
+        return
+
+    from myagentos.gateway.client import ModelGateway
+    from myagentos.gateway.mock_adapter import MockProviderAdapter
+    from myagentos.mya.commands import CommandHandlerService, ObservabilityService
+    from myagentos.ui.session import create_session
+
+    cmd = command.strip().lower()
+    if not cmd.startswith("/"):
+        cmd = f"/{cmd}"
+
+    session = create_session(Path(repo_path).resolve())
+    obs = ObservabilityService()
+    handlers = CommandHandlerService()
+
+    if cmd == "/info":
+        console.print(obs.render_info(session))
+    elif cmd == "/telemetry":
+        console.print(obs.render_telemetry(session.current_job_id))
+    elif cmd == "/monitor":
+        console.print(obs.render_monitor(session.current_job_id, session))
+    elif cmd == "/fast":
+        _, msg = handlers.handle_fast(argument)
+        console.print(msg)
+    elif cmd == "/sci_mode":
+        console.print(handlers.handle_sci_mode(argument))
+    elif cmd == "/deep_research":
+        console.print(handlers.handle_deep_research(argument))
+    elif cmd == "/optimize":
+        console.print(handlers.handle_optimize(argument))
+    elif cmd == "/decision":
+        console.print(handlers.handle_decision(argument))
+    elif cmd == "/cloud":
+        console.print(handlers.handle_cloud(argument))
+    elif cmd == "/security":
+        console.print(handlers.handle_security(argument))
+    else:
+        from myagentos.mya.agent import MyaAgent
+
+        gw = ModelGateway()
+        if "mock" not in gw.adapters:
+            gw.register_adapter("mock", MockProviderAdapter())
+        agent = MyaAgent(gateway=gw, model_id="mock")
+        resp = agent.converse(f"{command} {argument}".strip(), session=session)
+        console.print(resp)
 
 
 def main() -> None:
@@ -774,6 +833,19 @@ def main() -> None:
     p_proj.add_argument("--confirm", action="store_true", help="Confirm permanent deletion")
     p_proj.add_argument("--json", action="store_true", help="Output as JSON")
 
+    # mya command (§24 of mya-commands spec)
+    p_mya = subparsers.add_parser(
+        "mya", help="Execute Mya command or launch interactive terminal (§24)"
+    )
+    p_mya.add_argument(
+        "command",
+        nargs="?",
+        default=None,
+        help="Mya command to execute (e.g. /info, /monitor, /fast, /security)",
+    )
+    p_mya.add_argument("argument", nargs="?", default="", help="Command argument or prompt")
+    p_mya.add_argument("--repo", default=".", help="Repository root path")
+
     args = parser.parse_args()
 
     if args.subcommand is None:
@@ -818,6 +890,12 @@ def main() -> None:
             json_output=args.json,
             force=args.force,
             confirm=args.confirm,
+        )
+    elif args.subcommand == "mya":
+        cmd_mya(
+            command=args.command,
+            argument=args.argument,
+            repo_path=args.repo,
         )
 
 

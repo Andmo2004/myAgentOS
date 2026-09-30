@@ -36,6 +36,18 @@ class SlashCommandKind(StrEnum):
     CATEGORIZE = "categorize"
     PROJECTS = "projects"
 
+    # Mya Commands (§3 of mya-commands spec)
+    INFO = "info"
+    TELEMETRY = "telemetry"
+    MONITOR = "monitor"
+    FAST = "fast"
+    SCI_MODE = "sci_mode"
+    DEEP_RESEARCH = "deep_research"
+    OPTIMIZE = "optimize"
+    DECISION = "decision"
+    CLOUD = "cloud"
+    SECURITY = "security"
+
     # Mya commands (passed to Mya agent)
     MYA = "mya"
 
@@ -76,6 +88,17 @@ _SLASH_MAP: dict[str, SlashCommandKind] = {
     "/tests": SlashCommandKind.TESTS,
     "/categorize": SlashCommandKind.CATEGORIZE,
     "/projects": SlashCommandKind.PROJECTS,
+    # Mya Commands
+    "/info": SlashCommandKind.INFO,
+    "/telemetry": SlashCommandKind.TELEMETRY,
+    "/monitor": SlashCommandKind.MONITOR,
+    "/fast": SlashCommandKind.FAST,
+    "/sci_mode": SlashCommandKind.SCI_MODE,
+    "/deep_research": SlashCommandKind.DEEP_RESEARCH,
+    "/optimize": SlashCommandKind.OPTIMIZE,
+    "/decision": SlashCommandKind.DECISION,
+    "/cloud": SlashCommandKind.CLOUD,
+    "/security": SlashCommandKind.SECURITY,
     "/mya": SlashCommandKind.MYA,
 }
 
