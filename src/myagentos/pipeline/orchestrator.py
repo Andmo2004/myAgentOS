@@ -12,10 +12,12 @@ from typing import Any
 
 from myagentos.context.compiler import ContextCompiler
 from myagentos.core.models.event import EventActor, EventName
+from myagentos.core.models.failure import ObservedFailure
 from myagentos.core.models.patch import PatchSet
 from myagentos.core.models.plan import PlanSpec
 from myagentos.core.models.risk import RiskLevel
 from myagentos.core.store.event_store import EventStore
+from myagentos.failure.healing import HealingCoordinator
 from myagentos.fsm.controller import JobController
 from myagentos.fsm.states import JobState
 from myagentos.gateway.client import ModelGateway
@@ -44,6 +46,7 @@ class PipelineOrchestrator:
         event_store: EventStore | None = None,
         policy_engine: PolicyEngine | None = None,
         sandbox_driver: SandboxDriver | None = None,
+        healing_coordinator: HealingCoordinator | None = None,
     ) -> None:
         self.config = config
         self.repo_root = config.repo_root.resolve()
@@ -52,6 +55,7 @@ class PipelineOrchestrator:
         self.gateway = gateway or ModelGateway()
         self.policy_engine = policy_engine or PolicyEngine()
         self.sandbox_driver = sandbox_driver or MockSandboxDriver()
+        self.healing_coordinator = healing_coordinator or HealingCoordinator()
 
         self.router = LocalRouter()
         self.context_compiler = ContextCompiler(
@@ -231,33 +235,124 @@ class PipelineOrchestrator:
                 payload={"risk_escalated": False},
             )
 
-            # 9. Verification Guard
-            verification_res = self.verification_guard.verify(
-                worktree_path=worktree_path,
-                base_commit=base_commit,
-            )
-            if not verification_res.passed:
+            # 9. Verification Guard & Healing Loop (§14)
+            while True:
+                verification_res = self.verification_guard.verify(
+                    worktree_path=worktree_path,
+                    base_commit=base_commit,
+                )
+                if verification_res.passed:
+                    controller.transition(
+                        EventName.VERIFICATION_COMPLETED,
+                        EventActor.VERIFICATION_GUARD,
+                    )
+                    break
+
+                # Verification failed -> transition to FAILURE_CLASSIFY
                 controller.transition(
                     EventName.TEST_FAILED,
                     EventActor.VERIFICATION_GUARD,
                     payload={"diagnostics": verification_res.diagnostics},
                 )
-                return self._build_result(
+
+                observed = ObservedFailure(
+                    stage="VERIFY",
+                    exit_code=1,
+                    raw_output=verification_res.diagnostics,
+                    error_type=(
+                        verification_res.failure_code.value
+                        if verification_res.failure_code
+                        else None
+                    ),
+                )
+                healing_decision = self.healing_coordinator.evaluate(
                     job_id=job_id,
-                    success=False,
-                    controller=controller,
-                    intent=decision.intent.value,
-                    plan=plan,
-                    patch_set=patch_set,
-                    verification=verification_res,
-                    summary=f"Verification failed: {verification_res.diagnostics}",
-                    duration_seconds=time.monotonic() - t0,
+                    observed=observed,
+                    diff_output=patch_set.to_unified_diff(),
                 )
 
-            controller.transition(
-                EventName.VERIFICATION_COMPLETED,
-                EventActor.VERIFICATION_GUARD,
-            )
+                # Record deterministic failure classification in event chain
+                controller.transition(
+                    EventName.FAILURE_CLASSIFIED,
+                    EventActor.JOB_CONTROLLER,
+                    payload={
+                        "code": healing_decision.failure_record.code.value,
+                        "action": healing_decision.action.value,
+                        "attempt": healing_decision.retry_attempt,
+                    },
+                )
+
+                # Emit corresponding action event
+                controller.transition(
+                    healing_decision.fsm_event,
+                    EventActor.JOB_CONTROLLER,
+                    payload={"instructions": healing_decision.diagnostic_instructions},
+                )
+
+                if not healing_decision.can_retry:
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        patch_set=patch_set,
+                        verification=verification_res,
+                        summary=(
+                            f"Execution halted: {healing_decision.failure_record.code.value} "
+                            f"({healing_decision.action.value}) — "
+                            f"{healing_decision.failure_record.message}"
+                        ),
+                        duration_seconds=time.monotonic() - t0,
+                    )
+
+                # Retry: execute worker loop with healing diagnostic instructions
+                retry_prompt = f"{task_prompt}\n\n{healing_decision.diagnostic_instructions}"
+                worker_result = loop.run(retry_prompt)
+
+                if not worker_result.success or not worker_result.patch_set:
+                    controller.transition(
+                        EventName.JOB_FAILED,
+                        EventActor.WORKER,
+                        payload={"reason": worker_result.stop_reason},
+                    )
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        summary=f"Worker loop stopped on retry: {worker_result.stop_reason}",
+                        duration_seconds=time.monotonic() - t0,
+                    )
+
+                patch_set = worker_result.patch_set
+                controller.transition(EventName.PATCH_CREATED, EventActor.WORKER)
+
+                # Policy validation on updated patch
+                patch_ok, errs = self.policy_engine.validate_patch(patch_set, token)
+                if not patch_ok:
+                    controller.transition(
+                        EventName.POLICY_VIOLATION,
+                        EventActor.POLICY_ENGINE,
+                        payload={"errors": errs},
+                    )
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        patch_set=patch_set,
+                        summary=f"Policy violation on retry: {'; '.join(errs)}",
+                        duration_seconds=time.monotonic() - t0,
+                    )
+
+                controller.transition(
+                    EventName.POLICY_CHECKED,
+                    EventActor.POLICY_ENGINE,
+                    payload={"risk_escalated": False},
+                )
 
             # 10. Independent Review & Diff Approval
             state, _ = controller.transition(
@@ -285,7 +380,7 @@ class PipelineOrchestrator:
 
             # 11. Merge Check & Merge
             # Apply sealed patch set to repository root
-            apply_patch_set(self.repo_root, patch_set)
+            apply_patch_set(self.repo_root, patch_set, verify_before_hash=False)
 
             controller.transition(EventName.MERGE_COMPLETED, EventActor.MERGE_CONTROLLER)
             controller.transition(EventName.MERGE_COMPLETED, EventActor.MERGE_CONTROLLER)

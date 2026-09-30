@@ -147,6 +147,8 @@ class TransitionTable:
         elif current_state == JobState.EXECUTE:
             if event_name == EventName.PATCH_CREATED:
                 return JobState.POLICY_VALIDATION
+            if event_name in (EventName.TEST_FAILED, EventName.FAILURE_CLASSIFIED):
+                return JobState.FAILURE_CLASSIFY
             if event_name == EventName.JOB_FAILED:
                 return JobState.CANCELLED
 
@@ -165,6 +167,8 @@ class TransitionTable:
                 return JobState.FAILURE_CLASSIFY
 
         elif current_state == JobState.FAILURE_CLASSIFY:
+            if event_name == EventName.FAILURE_CLASSIFIED:
+                return JobState.FAILURE_CLASSIFY
             if event_name == EventName.RETRY_SCHEDULED:
                 return JobState.EXECUTE
             if event_name == EventName.CONTEXT_EXPANDED:

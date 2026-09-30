@@ -18,7 +18,11 @@ def calculate_file_sha256(file_path: Path) -> str:
     return h.hexdigest()
 
 
-def apply_patch_set(worktree_path: Path, patch_set: PatchSet) -> tuple[bool, str | None]:
+def apply_patch_set(
+    worktree_path: Path,
+    patch_set: PatchSet,
+    verify_before_hash: bool = True,
+) -> tuple[bool, str | None]:
     """Applies all patches in a PatchSet to the worktree and verifies integrity hashes (§12)."""
     for file_patch in patch_set.files:
         target = worktree_path / file_patch.path
@@ -29,7 +33,11 @@ def apply_patch_set(worktree_path: Path, patch_set: PatchSet) -> tuple[bool, str
                 op_val = file_patch.operation.value
                 return False, f"File to {op_val} does not exist: {file_patch.path}"
             actual_before = calculate_file_sha256(target)
-            if file_patch.sha256_before and actual_before != file_patch.sha256_before:
+            if (
+                verify_before_hash
+                and file_patch.sha256_before
+                and actual_before != file_patch.sha256_before
+            ):
                 return (
                     False,
                     f"Hash mismatch before applying patch to {file_patch.path}: "

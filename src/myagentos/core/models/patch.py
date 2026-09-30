@@ -69,3 +69,7 @@ class PatchSet(BaseModel):
     @property
     def has_mode_changes(self) -> bool:
         return any(f.mode_before != f.mode_after for f in self.files)
+
+    def to_unified_diff(self) -> str:
+        """Renders the entire patch set as unified diff text."""
+        return "\n".join(f"--- a/{f.path}\n+++ b/{f.path}\n{f.patch}" for f in self.files)
