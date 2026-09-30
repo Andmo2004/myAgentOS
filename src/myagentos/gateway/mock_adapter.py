@@ -38,11 +38,52 @@ class MockProviderAdapter(ProviderAdapter):
         # If schema is expected and preset is empty, try default schema instantiation
         if response_schema and content == "Mock LLM output":
             try:
-                # Attempt default dummy schema instance
-                dummy: Any = response_schema.model_construct()
-                content = dummy.model_dump_json()
+                if getattr(response_schema, "__name__", "") == "PlanResponseSchema":
+                    import json
+
+                    content = json.dumps(
+                        {
+                            "files_to_modify": ["src/main.py"],
+                            "files_to_create": [],
+                            "files_to_delete": [],
+                            "altered_interfaces": [],
+                            "test_specs": [],
+                            "preliminary_risk": "LOW",
+                            "risk_reasons": ["Mock default plan"],
+                            "permissions_requested": {
+                                "read": ["**"],
+                                "write": ["**"],
+                                "execute": ["pytest"],
+                            },
+                            "impact_summary": "Mock plan execution",
+                            "assumptions": [],
+                            "data_classification_max": "internal",
+                            "rationale": "Automated mock plan",
+                        }
+                    )
+                else:
+                    dummy: Any = response_schema.model_construct()
+                    content = dummy.model_dump_json()
             except Exception:
                 pass
+        elif content == "Mock LLM output":
+            import json
+
+            content = json.dumps(
+                {
+                    "thought": "Default mock patch proposal",
+                    "propose_patch": {
+                        "description": "Mock automated modification",
+                        "files": [
+                            {
+                                "path": "src/main.py",
+                                "operation": "MODIFY",
+                                "content": "# modified\n",
+                            }
+                        ],
+                    },
+                }
+            )
 
         return LLMResponse(
             content=content,

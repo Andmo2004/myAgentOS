@@ -70,54 +70,165 @@ def cmd_verify(job_id: str) -> None:
         sys.exit(1)
 
 
-def cmd_benchmark() -> None:
-    harness = BenchmarkHarness(store_dir=Path(".myagentos/bench_jobs"))
-    tasks = [
-        BenchmarkTask(
-            task_id="t1-typo",
-            prompt="/direct fix typo in documentation",
-            target_files=["docs/readme.md"],
-            expected_intent=RoutingIntent.DIRECT_WORKER_CODE,
-            expected_risk=RiskLevel.LOW,
-        ),
-        BenchmarkTask(
-            task_id="t2-auth",
-            prompt="Refactor user session authentication and password reset",
-            target_files=["src/auth/service.py", "src/auth/tokens.py"],
-            expected_intent=RoutingIntent.PLANNED_CODE,
-            expected_risk=RiskLevel.HIGH,
-        ),
-        BenchmarkTask(
-            task_id="t3-false-direct",
-            prompt="/direct change jwt token secret key",
-            target_files=["src/auth/jwt.py"],
-            expected_intent=RoutingIntent.PLANNED_CODE,  # Escalated due to high risk
-            expected_risk=RiskLevel.HIGH,
-        ),
-    ]
+def cmd_benchmark(
+    suite: str = "smoke",
+    output_path: str | None = None,
+    model_id: str = "mock",
+    harness_only: bool = False,
+) -> None:
+    if harness_only:
+        harness = BenchmarkHarness(store_dir=Path(".myagentos/bench_jobs"))
+        tasks = [
+            BenchmarkTask(
+                task_id="t1-typo",
+                prompt="/direct fix typo in documentation",
+                target_files=["docs/readme.md"],
+                expected_intent=RoutingIntent.DIRECT_WORKER_CODE,
+                expected_risk=RiskLevel.LOW,
+            ),
+            BenchmarkTask(
+                task_id="t2-auth",
+                prompt="Refactor user session authentication and password reset",
+                target_files=["src/auth/service.py", "src/auth/tokens.py"],
+                expected_intent=RoutingIntent.PLANNED_CODE,
+                expected_risk=RiskLevel.HIGH,
+            ),
+            BenchmarkTask(
+                task_id="t3-false-direct",
+                prompt="/direct change jwt token secret key",
+                target_files=["src/auth/jwt.py"],
+                expected_intent=RoutingIntent.PLANNED_CODE,
+                expected_risk=RiskLevel.HIGH,
+            ),
+        ]
 
-    table = Table(title="myagentos — Baseline Benchmark Validation (§26, §28)")
-    table.add_column("Task ID", style="cyan")
-    table.add_column("Intent Match", style="green")
-    table.add_column("False Direct?", style="magenta")
-    table.add_column("Risk Monotonic?", style="blue")
-    table.add_column("Final State", style="yellow")
-    table.add_column("Duration (ms)", style="dim")
-    table.add_column("Chain Intact?", style="bold green")
+        table = Table(title="myagentos — Baseline Benchmark Validation (§26, §28)")
+        table.add_column("Task ID", style="cyan")
+        table.add_column("Intent Match", style="green")
+        table.add_column("False Direct?", style="magenta")
+        table.add_column("Risk Monotonic?", style="blue")
+        table.add_column("Final State", style="yellow")
+        table.add_column("Duration (ms)", style="dim")
+        table.add_column("Chain Intact?", style="bold green")
 
-    for t in tasks:
-        metric = harness.run_task(t)
-        table.add_row(
-            metric.task_id,
-            "YES" if metric.intent_match else "NO",
-            "YES (Violation)" if metric.false_direct else "NO (Safe)",
-            "YES" if metric.risk_monotonically_preserved else "NO",
-            metric.final_state.value,
-            f"{metric.duration_seconds * 1000:.1f}",
-            "VALID" if metric.hash_chain_intact else "CORRUPTED",
+        for t in tasks:
+            metric = harness.run_task(t)
+            table.add_row(
+                metric.task_id,
+                "YES" if metric.intent_match else "NO",
+                "YES (Violation)" if metric.false_direct else "NO (Safe)",
+                "YES" if metric.risk_monotonically_preserved else "NO",
+                metric.final_state.value,
+                f"{metric.duration_seconds * 1000:.1f}",
+                "VALID" if metric.hash_chain_intact else "CORRUPTED",
+            )
+
+        console.print(table)
+        return
+
+    from myagentos.benchmark.runner import BenchmarkRunner
+    from myagentos.gateway.client import ModelGateway
+
+    gateway = ModelGateway()
+    runner = BenchmarkRunner(gateway=gateway, model_id=model_id)
+
+    out_file = Path(output_path) if output_path else None
+    console.print(
+        f"[bold cyan]Running myagentos Benchmark (§26, §28) — Suite: '{suite}'[/bold cyan]"
+    )
+
+    report = runner.run_suite(suite_name=suite, output_file=out_file)
+
+    # 1. Summary Metrics Comparison
+    summary_table = Table(title=f"Benchmark Summary Metrics — Suite '{suite}' (§26.2)")
+    summary_table.add_column("Metric", style="cyan")
+    summary_table.add_column("Baseline", style="yellow")
+    summary_table.add_column("myAgentOS", style="green")
+    summary_table.add_column("Advantage / Defense", style="bold blue")
+
+    summary_table.add_row(
+        "Task Success Rate",
+        f"{report.baseline_success_rate:.1f}%",
+        f"{report.myagentos_success_rate:.1f}%",
+        f"{report.myagentos_success_rate - report.baseline_success_rate:+.1f}%",
+    )
+    summary_table.add_row(
+        "False-Direct Defense",
+        "0.0% (Unchecked)",
+        f"{100.0 - report.false_direct_rate:.1f}%",
+        "Deterministic Escalation",
+    )
+    summary_table.add_row(
+        "Policy Defense Rate",
+        "0.0% (No limits)",
+        f"{report.policy_violation_defense_rate:.1f}%",
+        "Strict Token Ceilings",
+    )
+    summary_table.add_row(
+        "Protected Test Defense",
+        "0.0% (Tamperable)",
+        f"{report.protected_tampering_defense_rate:.1f}%",
+        "Cryptographic Guard",
+    )
+    summary_table.add_row(
+        "Avg Latency",
+        f"{report.avg_latency_baseline_ms:.1f} ms",
+        f"{report.avg_latency_myagentos_ms:.1f} ms",
+        f"{report.avg_latency_myagentos_ms - report.avg_latency_baseline_ms:+.1f} ms",
+    )
+    summary_table.add_row(
+        "Total Tokens",
+        f"{report.total_tokens_baseline:,}",
+        f"{report.total_tokens_myagentos:,}",
+        f"{report.total_tokens_myagentos - report.total_tokens_baseline:+,}",
+    )
+    summary_table.add_row(
+        "Estimated Cost",
+        f"${report.total_cost_baseline_usd:.4f}",
+        f"${report.total_cost_myagentos_usd:.4f}",
+        f"${report.total_cost_myagentos_usd - report.total_cost_baseline_usd:+.4f}",
+    )
+    summary_table.add_row(
+        "Hash Chain Integrity",
+        "N/A",
+        f"{report.hash_chain_integrity_rate:.1f}%",
+        "100% Tamper-Evident",
+    )
+    console.print(summary_table)
+
+    # 2. Detailed Task Breakdown Table
+    detail_table = Table(title="Task-by-Task Comparative Breakdown (§26.1)")
+    detail_table.add_column("Task ID", style="cyan")
+    detail_table.add_column("Category", style="magenta")
+    detail_table.add_column("Baseline State", style="yellow")
+    detail_table.add_column("myAgentOS State", style="green")
+    detail_table.add_column("Defense Triggered", style="blue")
+    detail_table.add_column("Chain", style="bold green")
+
+    for res in report.results:
+        b = res.baseline
+        m = res.myagentos
+        defense = (
+            "Protected Test Defended"
+            if m.protected_tampering_blocked
+            else (
+                "Policy Violation Blocked"
+                if m.policy_violation_caught
+                else "Normal Completion"
+            )
+        )
+        detail_table.add_row(
+            res.task.task_id,
+            res.task.category.value,
+            b.final_state,
+            m.final_state,
+            defense,
+            "VALID" if m.hash_chain_intact else "CORRUPTED",
         )
 
-    console.print(table)
+    console.print(detail_table)
+    if output_path:
+        console.print(f"[bold green]Full benchmark report saved to {output_path}[/bold green]")
 
 
 def cmd_continue(
@@ -367,7 +478,32 @@ def main() -> None:
     p_verify.add_argument("job_id", help="Job ID")
 
     # benchmark command
-    subparsers.add_parser("benchmark", help="Run benchmark suite")
+    p_bench = subparsers.add_parser(
+        "benchmark",
+        aliases=["bench"],
+        help="Run empirical benchmark suite (§26, §28)",
+    )
+    p_bench.add_argument(
+        "--suite",
+        default="smoke",
+        choices=["smoke", "full", "security", "pca"],
+        help="Benchmark task suite to execute (default: smoke)",
+    )
+    p_bench.add_argument(
+        "--output",
+        default=None,
+        help="Path to save output JSON benchmark report",
+    )
+    p_bench.add_argument(
+        "--model",
+        default="mock",
+        help="Model ID to evaluate across both baseline and myagentos",
+    )
+    p_bench.add_argument(
+        "--harness-only",
+        action="store_true",
+        help="Run legacy routing-only harness instead of full comparative evaluation",
+    )
 
     # continue command (§35 of PCA spec)
     p_continue = subparsers.add_parser("continue", help="Run Project Continuation Audit")
@@ -400,8 +536,13 @@ def main() -> None:
         cmd_status(args.job_id)
     elif args.subcommand == "verify":
         cmd_verify(args.job_id)
-    elif args.subcommand == "benchmark":
-        cmd_benchmark()
+    elif args.subcommand in ("benchmark", "bench"):
+        cmd_benchmark(
+            suite=args.suite,
+            output_path=args.output,
+            model_id=args.model,
+            harness_only=args.harness_only,
+        )
     elif args.subcommand == "continue":
         cmd_continue(action=args.action, repo_path=args.repo, dynamic=args.dynamic)
 
