@@ -5,6 +5,9 @@ class MyAgentOSError(Exception):
     """Base exception for all myagentos errors."""
 
 
+AgenticOSError = MyAgentOSError
+
+
 class RiskMonotonicityError(MyAgentOSError):
     """Raised when an attempt is made to de-escalate risk within a job."""
 

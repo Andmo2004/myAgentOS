@@ -166,6 +166,9 @@ class Finding(BaseModel):
     proposed_actions: list[ProposedFindingAction] = Field(default_factory=list)
 
 
+ProjectFinding = Finding
+
+
 class WorkingTreeState(BaseModel):
     """State of the git working tree at snapshot time (§7)."""
 
