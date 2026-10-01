@@ -53,16 +53,29 @@ MessageBlock.tool, .chat-message.-system, .chat-message.-tool {
     display: none;
 }
 
+.chat-content-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: left top;
+}
+
+.chat-body {
+    width: 1fr;
+    height: auto;
+}
+
 .chat-copy {
-    width: auto;
-    min-width: 8;
+    width: 3;
+    min-width: 3;
     height: 1;
     min-height: 1;
-    margin-top: 1;
-    padding: 0 1;
+    margin: 0;
+    padding: 0;
     border: none;
     background: transparent;
     color: $mya-muted;
+    content-align: center middle;
 }
 
 .chat-copy:hover {

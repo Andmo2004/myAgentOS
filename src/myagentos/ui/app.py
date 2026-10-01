@@ -1223,33 +1223,7 @@ class MyaApp(App[None]):
 
     async def _handle_natural_input(self, text: str) -> None:
         """Handle conversational or task intent input from the user."""
-        pure_conversation_prefixes = [
-            "hola",
-            "buenas",
-            "buenos días",
-            "buenas tardes",
-            "buenas noches",
-            "hello",
-            "hi",
-            "hey",
-            "cómo estás",
-            "como estas",
-            "how are you",
-            "quién eres",
-            "quien eres",
-            "who are you",
-            "qué eres",
-            "que eres",
-            "gracias",
-            "muchas gracias",
-            "thanks",
-            "thank you",
-        ]
         text_lower = text.lower().strip()
-        is_pure_conversation = any(
-            text_lower.startswith(p) or text_lower == p for p in pure_conversation_prefixes
-        )
-
         actionable_markers = [
             "añade", "añadir", "anade", "agrega", "agregar", "crea", "crear",
             "corrige", "corregir", "arregla", "arreglar", "cambia", "cambiar",
@@ -1260,23 +1234,9 @@ class MyaApp(App[None]):
             "delete ", "implement ", "refactor ", "optimize ", "install ", "update ",
             "configure ",
         ]
-        is_question = text_lower.endswith(("?", "؟")) or text_lower.startswith("¿")
-        is_conversational_question = is_question and not any(
-            marker in text_lower for marker in actionable_markers
-        )
-        conversational_context_phrases = (
-            "tienes contexto",
-            "tienes información sobre",
-            "tienes informacion sobre",
-            "conoces este proyecto",
-            "conoces esta aplicación",
-            "conoces esta aplicacion",
-            "sabes algo de este proyecto",
-            "sabes algo sobre este proyecto",
-        )
-        is_context_question = any(phrase in text_lower for phrase in conversational_context_phrases)
+        is_action_request = any(marker in text_lower for marker in actionable_markers)
 
-        if is_pure_conversation or is_conversational_question or is_context_question:
+        if not is_action_request:
             response = await self._think(self._converse, text)
             self._append_mya_message(response)
             self._record_conversation_turn(text, response)
@@ -1380,14 +1340,14 @@ class MyaApp(App[None]):
 
     @on(ChatMessage.CopyRequested)
     def _copy_chat_message(self, event: ChatMessage.CopyRequested) -> None:
+        """Copy a Mya response using Textual's native clipboard integration."""
         try:
             if sys.platform == "darwin":
                 _copy_to_macos_clipboard(event.text)
             self.copy_to_clipboard(event.text)
-        except (OSError, subprocess.SubprocessError):
-            self.notify("No se pudo copiar la respuesta al portapapeles.", severity="error")
-            return
-        self.notify("Respuesta copiada al portapapeles.", timeout=2)
+            self.notify("Respuesta copiada", timeout=1.5)
+        except Exception as exc:
+            self.notify(f"No se pudo copiar la respuesta: {exc}", severity="error", timeout=2)
 
     def _append_tool_message(self, content: RenderableType) -> None:
         self._append_message(content, "tool")
@@ -1400,6 +1360,7 @@ class MyaApp(App[None]):
 
     async def _clear_conversation(self) -> None:
         conv = self.query_one("#conversation", VerticalScroll)
+        self._conversation_history.clear()
         await conv.remove_children([child for child in conv.children if child.id != "welcome"])
 
     # ── Actions ─────────────────────────────────────────────────────

@@ -33,6 +33,7 @@ class Icons:
     BRANCH = "⎇"
     DOT = "·"
     BAR = "▎"
+    COPY = "⧉"
 
 
 from myagentos.ui.theme.mya_theme import (

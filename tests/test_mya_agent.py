@@ -86,8 +86,7 @@ class TestMyaVoiceAndConversation:
 
     def test_converse_greeting(self, mya_agent: MyaAgent) -> None:
         resp = mya_agent.converse("Hola Mya")
-        assert "Mya" in resp
-        assert "Serena" in resp or "competente" in resp or "lista" in resp
+        assert resp == "Hola. ¿Qué tienes en mente?"
 
     def test_converse_identity_question(self, mya_agent: MyaAgent) -> None:
         resp = mya_agent.converse("¿Quién eres?")
@@ -146,6 +145,25 @@ class TestMyaVoiceAndConversation:
         resp = mya_agent.converse("¿Tienes contexto sobre esta aplicación?", session=session)
         assert "contexto" in resp.lower()
         assert "myagentos" in resp.lower()
+
+    def test_converse_project_list_uses_registered_projects(
+        self,
+        mya_agent: MyaAgent,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "myagentos.projects.service.ProjectManagerService.list_projects",
+            lambda _service: [],
+        )
+        monkeypatch.setattr(
+            mya_agent.gateway,
+            "generate",
+            lambda **_kwargs: pytest.fail("Project registry questions should use local data"),
+        )
+
+        response = mya_agent.converse("Hola, ¿qué proyectos tenemos en mente?")
+
+        assert "ningún proyecto registrado" in response
 
     def test_converse_passes_project_context_to_gateway(self, mya_agent: MyaAgent, mock_gateway: ModelGateway) -> None:
         session = create_session(None)

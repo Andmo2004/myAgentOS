@@ -77,13 +77,14 @@ class ChatMessage(Vertical):
                 f"[b]{_ROLE_LABELS.get(self.role, self.role)}[/b]  [{Colors.DIM}]{self._timestamp}[/{Colors.DIM}]",
                 classes="chat-header",
             )
-        yield Static(self._content, classes="chat-body")
-        if self._copy_text is not None:
-            yield Button(
-                "Copiar",
-                classes="chat-copy",
-                tooltip="Copiar respuesta al portapapeles",
-            )
+        with Horizontal(classes="chat-content-row"):
+            yield Static(self._content, classes="chat-body")
+            if self._copy_text is not None:
+                yield Button(
+                    Icons.COPY,
+                    classes="chat-copy",
+                    tooltip="Copiar respuesta al portapapeles",
+                )
 
     @on(Button.Pressed, ".chat-copy")
     def _on_copy_pressed(self) -> None:

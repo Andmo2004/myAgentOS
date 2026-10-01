@@ -206,6 +206,23 @@ class MyaAgent:
         if not clean_input:
             return "Aquí estoy. Dime qué tienes en mente."
 
+        lower_input = clean_input.lower()
+        if "proyectos" in lower_input and any(
+            phrase in lower_input
+            for phrase in (
+                "tenemos",
+                "mis proyectos",
+                "listar proyectos",
+                "ver proyectos",
+                "qué proyectos tengo",
+                "que proyectos tengo",
+                "cuáles son mis proyectos",
+                "cuales son mis proyectos",
+                "lista de proyectos",
+            )
+        ):
+            return self._generate_fallback_conversation(clean_input, session)
+
         messages: list[LLMMessage] = [LLMMessage(role="system", content=MYA_CONVERSE_PROMPT)]
 
         context_parts: list[str] = []
@@ -402,10 +419,7 @@ class MyaAgent:
             repository_scope=None,
             requested_mode="interactive",
             unresolved_questions=[],
-            commentary=(
-                f"Entendido. Interpreto que quieres: «{fallback_prompt}». "
-                "La intención queda lista para que el sistema decida los siguientes pasos."
-            ),
+            commentary=f"Entendido: {fallback_prompt}.",
         )
 
     def _enforce_security_rules(self, constraints: list[str], raw_prompt: str) -> list[str]:
@@ -433,10 +447,7 @@ class MyaAgent:
 
     def _default_intent_commentary(self, intent: UserIntent) -> str:
         """Generates a default commentary in Mya's voice."""
-        return (
-            f"Entendido. Interpreto que quieres: «{intent.objective}». "
-            "El sistema ya tiene la intención estructurada para decidir los siguientes pasos."
-        )
+        return f"Entendido: {intent.objective}."
 
     def _generate_fallback_conversation(
         self,
@@ -446,12 +457,15 @@ class MyaAgent:
         """Deterministic conversational responses matching Mya's voice."""
         lower = clean_input.lower()
 
-        if any(g in lower for g in ["hola", "buenas", "hello", "hi"]):
-            repo_name = f" en {session.repository}" if session and session.repository else ""
-            return (
-                f"Hola. Mya al habla{repo_name}. "
-                "Serena, competente y lista para trabajar. ¿Qué quieres construir o revisar?"
-            )
+        if lower.strip(" ¡!.,¿?") in {
+            "hola",
+            "hola mya",
+            "buenas",
+            "hello",
+            "hi",
+            "hey",
+        }:
+            return "Hola. ¿Qué tienes en mente?"
 
         if any(q in lower for q in ["quién eres", "quien eres", "who are you", "qué eres"]):
             return (
@@ -557,11 +571,17 @@ class MyaAgent:
             "muestrame mis proyectos",
             "qué proyectos tengo",
             "que proyectos tengo",
+            "qué proyectos tenemos",
+            "que proyectos tenemos",
+            "qué proyectos tenemos en mente",
+            "que proyectos tenemos en mente",
             "cuáles son mis proyectos",
             "cuales son mis proyectos",
             "lista de proyectos",
         ]
-        if any(lp in lower for lp in list_projects_queries):
+        if any(lp in lower for lp in list_projects_queries) or (
+            "proyectos" in lower and "tenemos" in lower
+        ):
             from myagentos.projects.service import ProjectManagerService
 
             try:
@@ -626,7 +646,4 @@ class MyaAgent:
                 "nunca se borran."
             )
 
-        return (
-            f"Te escucho. He tomado nota de: '{clean_input}'. "
-            "Si quieres ejecutarlo como tarea, dímelo y lo estructuro para el sistema."
-        )
+        return "Sí, te sigo. Cuéntame un poco más y lo vemos juntos."
