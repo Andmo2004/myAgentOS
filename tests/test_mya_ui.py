@@ -85,7 +85,10 @@ async def test_mya_app_routes_questions_and_tasks_to_their_channels(
         for conversational_input in [
             "Hola",
             "Hola, ¿qué proyectos tenemos en mente?",
+            "Hola que cosas tenemos por hacer?",
             "¿Tienes contexto sobre esta aplicación?",
+            "¿Qué sabes del proyecto activo?",
+            "¿Cuál es el segundo?",
             "Gracias",
         ]:
             inp.value = conversational_input
@@ -95,7 +98,7 @@ async def test_mya_app_routes_questions_and_tasks_to_their_channels(
             conversation_call = app.gateway.adapters["mock"].call_history[-1]
             assert "Task: Conversation" in conversation_call[0].content
 
-        inp.value = "Añade logging estructurado a auth"
+        inp.value = "Arregla los tests"
         await pilot.press("enter")
         await pilot.pause()
 
@@ -344,7 +347,3 @@ async def test_mya_app_ctrl_d_quits_with_prompt_text() -> None:
 
         await pilot.press("ctrl+d")
         assert pilot.app.is_running is False
-
-
-
-

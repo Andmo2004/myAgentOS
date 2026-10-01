@@ -1,12 +1,18 @@
 """Unit and security tests for MyaAgent (Mya as LLM interface)."""
 
+from pathlib import Path
+
 import pytest
 
 from myagentos.gateway.client import ModelGateway
 from myagentos.gateway.mock_adapter import MockProviderAdapter
 from myagentos.mya.agent import MyaAgent
+from myagentos.mya.context import ConversationContextService
 from myagentos.mya.dialogue import Question, QuestionKind
 from myagentos.mya.intent import IntentMode
+from myagentos.projects.models import Project, ProjectState
+from myagentos.projects.registry import ProjectRegistry
+from myagentos.projects.service import ProjectManagerService
 from myagentos.ui.session import create_session
 
 
@@ -90,8 +96,7 @@ class TestMyaVoiceAndConversation:
 
     def test_converse_identity_question(self, mya_agent: MyaAgent) -> None:
         resp = mya_agent.converse("¿Quién eres?")
-        assert "voz de Agentic OS" in resp
-        assert "Job Controller" in resp
+        assert resp == "Soy Mya, la interfaz conversacional de Agentic OS."
 
     def test_explain_fsm_state(self, mya_agent: MyaAgent) -> None:
         explanation = mya_agent.explain(
@@ -136,7 +141,7 @@ class TestMyaVoiceAndConversation:
         session.project_profile = profile
 
         resp = mya_agent.converse("¿Qué tipo de proyecto es este?", session=session)
-        assert "categorizado como" in resp
+        assert "perfil" in resp
         assert "Python" in resp or "CLI" in resp
 
     def test_converse_context_question_uses_session_context(self, mya_agent: MyaAgent) -> None:
@@ -155,17 +160,169 @@ class TestMyaVoiceAndConversation:
             "myagentos.projects.service.ProjectManagerService.list_projects",
             lambda _service: [],
         )
-        monkeypatch.setattr(
-            mya_agent.gateway,
-            "generate",
-            lambda **_kwargs: pytest.fail("Project registry questions should use local data"),
-        )
 
         response = mya_agent.converse("Hola, ¿qué proyectos tenemos en mente?")
 
         assert "ningún proyecto registrado" in response
+        last_call = mya_agent.gateway.adapters["mock"].call_history[-1]
+        assert any("Registered projects (0)" in message.content for message in last_call)
 
-    def test_converse_passes_project_context_to_gateway(self, mya_agent: MyaAgent, mock_gateway: ModelGateway) -> None:
+    def test_greeting_with_project_question_answers_question(
+        self,
+        mya_agent: MyaAgent,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        registry = ProjectRegistry(tmp_path / "projects.json")
+        registry.save_project(
+            Project(
+                project_id="project-a",
+                name="project-a",
+                path=str(tmp_path / "project-a"),
+                state=ProjectState.ACTIVE,
+            )
+        )
+        mya_agent.conversation_context_service = ConversationContextService(
+            ProjectManagerService(registry=registry)
+        )
+        response = mya_agent.converse("Hola, ¿qué proyectos tenemos?")
+
+        assert "project-a" in response
+        assert "Hola. ¿Qué tienes en mente?" not in response
+        assert "propose_patch" not in response
+
+    def test_pending_work_does_not_claim_projects_are_tasks(
+        self,
+        mya_agent: MyaAgent,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "myagentos.projects.service.ProjectManagerService.list_projects",
+            lambda _service: [],
+        )
+        response = mya_agent.converse("¿Qué cosas tenemos por hacer?")
+
+        assert "backlog" in response
+        assert "listado de jobs abiertos" in response
+        assert "proyectos registrados" in response
+
+    def test_provider_failure_uses_contextual_project_fallback(
+        self,
+        mya_agent: MyaAgent,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        registry = ProjectRegistry(tmp_path / "projects.json")
+        for project_id, name in (("one", "alpha"), ("two", "beta")):
+            registry.save_project(
+                Project(
+                    project_id=project_id,
+                    name=name,
+                    path=str(tmp_path / name),
+                    state=ProjectState.ACTIVE,
+                )
+            )
+        mya_agent.conversation_context_service = ConversationContextService(
+            ProjectManagerService(registry=registry)
+        )
+        monkeypatch.setattr(
+            mya_agent.gateway,
+            "generate",
+            lambda **_kwargs: (_ for _ in ()).throw(ConnectionError("offline")),
+        )
+
+        response = mya_agent.converse("Hola, ¿qué proyectos tenemos?")
+
+        assert "alpha" in response
+        assert "beta" in response
+        assert "sí, te sigo" not in response.lower()
+
+    def test_followup_second_project_uses_conversation_history(
+        self,
+        mya_agent: MyaAgent,
+        tmp_path: Path,
+    ) -> None:
+        registry = ProjectRegistry(tmp_path / "projects.json")
+        for project_id, name in (("one", "alpha"), ("two", "beta")):
+            registry.save_project(
+                Project(
+                    project_id=project_id,
+                    name=name,
+                    path=str(tmp_path / name),
+                    state=ProjectState.ACTIVE,
+                )
+            )
+        mya_agent.conversation_context_service = ConversationContextService(
+            ProjectManagerService(registry=registry)
+        )
+        response = mya_agent.converse(
+            "¿Cuál es el segundo?",
+            history=[
+                {"role": "user", "content": "¿Qué proyectos tenemos?"},
+                {"role": "assistant", "content": "alpha y beta"},
+            ],
+        )
+
+        assert "beta" in response
+
+    def test_unanchored_second_project_reference_is_not_guessed(
+        self,
+        mya_agent: MyaAgent,
+        tmp_path: Path,
+    ) -> None:
+        registry = ProjectRegistry(tmp_path / "projects.json")
+        for project_id, name in (("one", "alpha"), ("two", "beta")):
+            registry.save_project(
+                Project(
+                    project_id=project_id,
+                    name=name,
+                    path=str(tmp_path / name),
+                    state=ProjectState.ACTIVE,
+                )
+            )
+        mya_agent.conversation_context_service = ConversationContextService(
+            ProjectManagerService(registry=registry)
+        )
+
+        response = mya_agent.converse("¿Cuál es el segundo?")
+
+        assert "referencia previa suficiente" in response
+
+    def test_converse_question_sends_context_and_history_to_provider(
+        self,
+        mya_agent: MyaAgent,
+        mock_gateway: ModelGateway,
+    ) -> None:
+        session = create_session(None)
+        session.repository = "myAgentOS"
+        session.branch = "main"
+        session.commit_short = "abcdef1"
+
+        mya_agent.converse(
+            "¿Tienes contexto sobre esta aplicación?",
+            session=session,
+            history=[{"role": "assistant", "content": "Hola."}],
+        )
+
+        messages = mock_gateway.adapters["mock"].call_history[-1]
+        assert any("name: myAgentOS" in message.content for message in messages)
+        assert any("branch: main" in message.content for message in messages)
+        assert any(message.content == "Hola." for message in messages)
+        assert any(
+            "Do not invent projects, tasks or repository facts." in message.content
+            for message in messages
+        )
+
+    def test_explicit_action_keeps_structured_intent_path(self, mya_agent: MyaAgent) -> None:
+        result = mya_agent.interpret("Arregla los tests.")
+
+        assert result.resolved is True
+        assert result.intent is not None
+        assert "Arregla los tests" in result.intent.objective
+
+    def test_converse_passes_project_context_to_gateway(
+        self, mya_agent: MyaAgent, mock_gateway: ModelGateway
+    ) -> None:
         session = create_session(None)
         session.repository = "myAgentOS"
         session.branch = "main"
@@ -174,6 +331,6 @@ class TestMyaVoiceAndConversation:
         mya_agent.converse("¿Qué sabes de este proyecto?", session=session)
 
         last_call = mock_gateway.adapters["mock"].call_history[-1]
-        assert any("Repository: myAgentOS" in message.content for message in last_call)
-        assert any("Branch: main" in message.content for message in last_call)
-        assert any("Commit: abcdef1" in message.content for message in last_call)
+        assert any("name: myAgentOS" in message.content for message in last_call)
+        assert any("branch: main" in message.content for message in last_call)
+        assert any("commit: abcdef1" in message.content for message in last_call)
