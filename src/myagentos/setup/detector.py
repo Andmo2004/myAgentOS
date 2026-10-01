@@ -20,7 +20,7 @@ def is_setup_complete(mya_home: Path | str | None = None) -> bool:
     config = load_config(mya_home=home)
     if config is None:
         return False
-    return bool(config.setup.completed)
+    return config.setup.completed
 
 
 def needs_first_run(mya_home: Path | str | None = None) -> bool:
