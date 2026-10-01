@@ -1,6 +1,7 @@
 """Tests for Mya interactive terminal UI (headless Textual app)."""
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -38,6 +39,28 @@ async def test_mya_app_handle_greeting() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mya_response_copy_button_uses_clipboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pbcopy_calls: list[str] = []
+
+    def fake_pbcopy(*args: object, **kwargs: object) -> None:
+        pbcopy_calls.append(str(args[0] if args else kwargs["input"]))
+
+    monkeypatch.setattr("myagentos.ui.app._copy_to_macos_clipboard", fake_pbcopy)
+    app = MyaApp()
+    async with app.run_test() as pilot:
+        app._append_mya_message("Respuesta lista para copiar")
+        await pilot.pause()
+        await pilot.click(".chat-copy")
+        await pilot.pause()
+
+    assert app._clipboard == "Respuesta lista para copiar"
+    if sys.platform == "darwin":
+        assert pbcopy_calls == ["Respuesta lista para copiar"]
+
+
+@pytest.mark.asyncio
 async def test_mya_app_handle_task_intent() -> None:
     app = MyaApp()
     async with app.run_test() as pilot:
@@ -49,6 +72,30 @@ async def test_mya_app_handle_task_intent() -> None:
         conversation = pilot.app.query_one("#conversation")
         children = list(conversation.children)
         assert len(children) >= 2
+
+
+@pytest.mark.asyncio
+async def test_mya_app_routes_questions_and_tasks_to_their_channels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MYA_MODEL", "mock-mya")
+    app = MyaApp()
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#prompt-input", Input)
+
+        inp.value = "¿Tienes contexto sobre esta aplicación?"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        conversation_call = app.gateway.adapters["mock"].call_history[-1]
+        assert "Task: Conversation" in conversation_call[0].content
+
+        inp.value = "Añade logging estructurado a auth"
+        await pilot.press("enter")
+        await pilot.pause()
+
+        intent_call = app.gateway.adapters["mock"].call_history[-1]
+        assert "Task: Intent Interpretation" in intent_call[0].content
 
 
 @pytest.mark.asyncio

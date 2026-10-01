@@ -45,11 +45,17 @@ _ROLE_LABELS: dict[MessageRole, str] = {
 class ChatMessage(Vertical):
     """A conversation entry rendered with vertical accent bar."""
 
+    class CopyRequested(Message):
+        def __init__(self, text: str) -> None:
+            super().__init__()
+            self.text = text
+
     def __init__(
         self,
         content: RenderableType,
         role: MessageRole = "mya",
         provider: str | None = None,
+        copy_text: str | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -62,6 +68,7 @@ class ChatMessage(Vertical):
         self.role: MessageRole = role
         self.provider = provider
         self._content = content
+        self._copy_text = copy_text
         self._timestamp = datetime.now().strftime("%H:%M")
 
     def compose(self) -> ComposeResult:
@@ -71,6 +78,17 @@ class ChatMessage(Vertical):
                 classes="chat-header",
             )
         yield Static(self._content, classes="chat-body")
+        if self._copy_text is not None:
+            yield Button(
+                "Copiar",
+                classes="chat-copy",
+                tooltip="Copiar respuesta al portapapeles",
+            )
+
+    @on(Button.Pressed, ".chat-copy")
+    def _on_copy_pressed(self) -> None:
+        if self._copy_text is not None:
+            self.post_message(self.CopyRequested(self._copy_text))
 
 
 MessageBlock = ChatMessage

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
@@ -70,6 +72,16 @@ from myagentos.ui.widgets.chat import (
 T = TypeVar("T")
 
 PROMPT_HINTS = "Enter enviar · / comandos · Tab completar · ↑↓ historial"
+
+
+def _copy_to_macos_clipboard(text: str) -> None:
+    subprocess.run(
+        ["pbcopy"],
+        input=text,
+        text=True,
+        check=True,
+        timeout=2,
+    )
 
 
 def build_help() -> RenderableType:
@@ -230,6 +242,7 @@ class MyaApp(App[None]):
 
         self.mya_agent = MyaAgent(gateway=self.gateway, model_id=actual_model)
         self._history: list[str] = []
+        self._conversation_history: list[dict[str, str]] = []
         self._history_index: int = -1
         self._history_draft: str = ""
         self._suppress_suggestions: bool = False
@@ -1237,9 +1250,36 @@ class MyaApp(App[None]):
             text_lower.startswith(p) or text_lower == p for p in pure_conversation_prefixes
         )
 
-        if is_pure_conversation:
+        actionable_markers = [
+            "añade", "añadir", "anade", "agrega", "agregar", "crea", "crear",
+            "corrige", "corregir", "arregla", "arreglar", "cambia", "cambiar",
+            "modifica", "modificar", "elimina", "eliminar", "borra", "borrar",
+            "implementa", "implementar", "refactoriza", "refactorizar", "optimiza",
+            "optimizar", "instala", "instalar", "actualiza", "actualizar", "configura",
+            "configurar", "haz", "make", "add ", "create ", "fix ", "change ", "modify ",
+            "delete ", "implement ", "refactor ", "optimize ", "install ", "update ",
+            "configure ",
+        ]
+        is_question = text_lower.endswith(("?", "؟")) or text_lower.startswith("¿")
+        is_conversational_question = is_question and not any(
+            marker in text_lower for marker in actionable_markers
+        )
+        conversational_context_phrases = (
+            "tienes contexto",
+            "tienes información sobre",
+            "tienes informacion sobre",
+            "conoces este proyecto",
+            "conoces esta aplicación",
+            "conoces esta aplicacion",
+            "sabes algo de este proyecto",
+            "sabes algo sobre este proyecto",
+        )
+        is_context_question = any(phrase in text_lower for phrase in conversational_context_phrases)
+
+        if is_pure_conversation or is_conversational_question or is_context_question:
             response = await self._think(self._converse, text)
             self._append_mya_message(response)
+            self._record_conversation_turn(text, response)
             return
 
         # Interpret intent through Mya LLM
@@ -1247,20 +1287,10 @@ class MyaApp(App[None]):
         if result.resolved and result.intent:
             commentary = (
                 result.explanation
-                or f"Entendido. Objetivo: '{result.intent.objective}'. "
-                "Coordinando con el Job Controller."
+                or f"Entendido. Interpreto que quieres: «{result.intent.objective}»."
             )
-            lines = [
-                commentary,
-                "",
-                f"[bold]Objetivo:[/bold] {result.intent.objective}",
-            ]
-            if result.intent.constraints:
-                lines.append(f"[bold]Restricciones:[/bold] {', '.join(result.intent.constraints)}")
-            if result.intent.repository_scope:
-                lines.append(f"[bold]Alcance:[/bold] {result.intent.repository_scope}")
-            lines.append(f"[bold]Modo:[/bold] {result.intent.requested_mode.value}")
-            self._append_mya_message("\n".join(lines))
+            self._append_mya_message(commentary)
+            self._record_conversation_turn(text, commentary)
         elif result.questions:
             lines = [
                 result.explanation or "Necesito aclarar algunos detalles antes de proceder:",
@@ -1268,13 +1298,30 @@ class MyaApp(App[None]):
             ]
             for q in result.questions:
                 lines.append(f"  • {q}")
-            self._append_mya_message("\n".join(lines))
+            response = "\n".join(lines)
+            self._append_mya_message(response)
+            self._record_conversation_turn(text, response)
         else:
             response = await self._think(self._converse, text)
             self._append_mya_message(response)
+            self._record_conversation_turn(text, response)
+
+    def _record_conversation_turn(self, user_text: str, assistant_text: str) -> None:
+        """Keep recent natural-language turns available to Mya's conversation channel."""
+        self._conversation_history.extend(
+            [
+                {"role": "user", "content": user_text},
+                {"role": "assistant", "content": assistant_text},
+            ]
+        )
+        del self._conversation_history[:-12]
 
     def _converse(self, text: str) -> str:
-        return self.mya_agent.converse(text, session=self.session)
+        return self.mya_agent.converse(
+            text,
+            session=self.session,
+            history=self._conversation_history,
+        )
 
     def _interpret(self, text: str) -> Any:
         return self.mya_agent.interpret(text, session=self.session)
@@ -1308,10 +1355,11 @@ class MyaApp(App[None]):
         content: RenderableType,
         role: MessageRole,
         provider: str | None = None,
+        copy_text: str | None = None,
     ) -> None:
         conv = self.query_one("#conversation", VerticalScroll)
         prov = provider or (self.provider if role in ("mya", "agent") else None)
-        conv.mount(ChatMessage(content, role=role, provider=prov))
+        conv.mount(ChatMessage(content, role=role, provider=prov, copy_text=copy_text))
         self.call_after_refresh(conv.scroll_end, animate=False)
 
     def _append_user_message(self, text: str) -> None:
@@ -1327,7 +1375,19 @@ class MyaApp(App[None]):
         rendered: RenderableType = content
         if isinstance(content, str) and not content.startswith("["):
             rendered = Markdown(content)
-        self._append_message(rendered, "agent", provider=self.provider)
+        copy_text = content if isinstance(content, str) else None
+        self._append_message(rendered, "agent", provider=self.provider, copy_text=copy_text)
+
+    @on(ChatMessage.CopyRequested)
+    def _copy_chat_message(self, event: ChatMessage.CopyRequested) -> None:
+        try:
+            if sys.platform == "darwin":
+                _copy_to_macos_clipboard(event.text)
+            self.copy_to_clipboard(event.text)
+        except (OSError, subprocess.SubprocessError):
+            self.notify("No se pudo copiar la respuesta al portapapeles.", severity="error")
+            return
+        self.notify("Respuesta copiada al portapapeles.", timeout=2)
 
     def _append_tool_message(self, content: RenderableType) -> None:
         self._append_message(content, "tool")

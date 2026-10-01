@@ -208,6 +208,38 @@ class MyaAgent:
 
         messages: list[LLMMessage] = [LLMMessage(role="system", content=MYA_CONVERSE_PROMPT)]
 
+        context_parts: list[str] = []
+        if session:
+            if session.repository:
+                context_parts.append(f"Repository: {session.repository}")
+            if session.branch:
+                context_parts.append(f"Branch: {session.branch}")
+            if session.commit_short:
+                context_parts.append(f"Commit: {session.commit_short}")
+            if session.project_profile:
+                profile = session.project_profile
+                tags = ", ".join(t.label for t in profile.visible_tags)
+                languages = ", ".join(profile.stack.languages)
+                app_types = ", ".join(profile.architecture.application_type)
+                if tags:
+                    context_parts.append(f"Project tags: {tags}")
+                if languages:
+                    context_parts.append(f"Project languages: {languages}")
+                if app_types:
+                    context_parts.append(f"Project application type: {app_types}")
+        if context_parts:
+            messages.append(
+                LLMMessage(
+                    role="system",
+                    content=(
+                        "## Current session context\n"
+                        "Use this as factual context for the conversation. "
+                        "It is metadata about the active project, not a substitute for reading file contents.\n"
+                        + "\n".join(context_parts)
+                    ),
+                )
+            )
+
         if history:
             for item in history[-6:]:  # Keep recent context
                 messages.append(
@@ -370,7 +402,10 @@ class MyaAgent:
             repository_scope=None,
             requested_mode="interactive",
             unresolved_questions=[],
-            commentary=f"Entendido. Preparado para proceder con: '{fallback_prompt}'.",
+            commentary=(
+                f"Entendido. Interpreto que quieres: «{fallback_prompt}». "
+                "La intención queda lista para que el sistema decida los siguientes pasos."
+            ),
         )
 
     def _enforce_security_rules(self, constraints: list[str], raw_prompt: str) -> list[str]:
@@ -399,8 +434,8 @@ class MyaAgent:
     def _default_intent_commentary(self, intent: UserIntent) -> str:
         """Generates a default commentary in Mya's voice."""
         return (
-            f"He interpretado tu solicitud como: '{intent.objective}'. "
-            "Paso el control al Job Controller para coordinar el plan y la ejecución."
+            f"Entendido. Interpreto que quieres: «{intent.objective}». "
+            "El sistema ya tiene la intención estructurada para decidir los siguientes pasos."
         )
 
     def _generate_fallback_conversation(
@@ -424,6 +459,41 @@ class MyaAgent:
                 "Yo converso, interpreto, explico y comento con serenidad e ironía comedida. "
                 "Los agentes especializados (Planner, Worker, Reviewer) hacen el trabajo duro "
                 "bajo la supervisión del Job Controller."
+            )
+
+        if any(
+            q in lower
+            for q in [
+                "tienes contexto",
+                "tienes información sobre este proyecto",
+                "tienes informacion sobre este proyecto",
+                "tienes información sobre esta aplicación",
+                "tienes informacion sobre esta aplicacion",
+                "conoces este proyecto",
+                "conoces esta aplicación",
+                "conoces esta aplicacion",
+                "sabes algo de este proyecto",
+                "sabes algo sobre este proyecto",
+            ]
+        ):
+            repo_name = f" ({session.repository})" if session and session.repository else ""
+            if session and session.project_profile:
+                profile = session.project_profile
+                languages = ", ".join(profile.stack.languages) or "el stack detectado"
+                return (
+                    f"Sí. Tengo contexto del proyecto activo{repo_name}, al menos de su metadato de sesión "
+                    f"y de su perfil detectado. En concreto, veo {languages}. "
+                    "Para hablar de una parte concreta del código necesitaría tenerla en el contexto de trabajo."
+                )
+            if session and session.repository:
+                return (
+                    f"Sí. Tengo contexto de la sesión y del repositorio activo{repo_name}. "
+                    "Puedo usar ese contexto para orientarme, aunque para afirmar detalles concretos del código "
+                    "necesito que estén disponibles en el contexto de trabajo."
+                )
+            return (
+                "Sí, puedo trabajar con el contexto que Agentic OS tenga disponible de esta sesión. "
+                "Ahora mismo no tengo metadatos de un repositorio activo para concretarlo más."
             )
 
         if any(c in lower for c in ["cómo estás", "como estas", "how are you"]):

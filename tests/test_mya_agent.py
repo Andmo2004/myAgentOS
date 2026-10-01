@@ -139,3 +139,23 @@ class TestMyaVoiceAndConversation:
         resp = mya_agent.converse("¿Qué tipo de proyecto es este?", session=session)
         assert "categorizado como" in resp
         assert "Python" in resp or "CLI" in resp
+
+    def test_converse_context_question_uses_session_context(self, mya_agent: MyaAgent) -> None:
+        session = create_session(None)
+        session.repository = "myAgentOS"
+        resp = mya_agent.converse("¿Tienes contexto sobre esta aplicación?", session=session)
+        assert "contexto" in resp.lower()
+        assert "myagentos" in resp.lower()
+
+    def test_converse_passes_project_context_to_gateway(self, mya_agent: MyaAgent, mock_gateway: ModelGateway) -> None:
+        session = create_session(None)
+        session.repository = "myAgentOS"
+        session.branch = "main"
+        session.commit_short = "abcdef1"
+
+        mya_agent.converse("¿Qué sabes de este proyecto?", session=session)
+
+        last_call = mock_gateway.adapters["mock"].call_history[-1]
+        assert any("Repository: myAgentOS" in message.content for message in last_call)
+        assert any("Branch: main" in message.content for message in last_call)
+        assert any("Commit: abcdef1" in message.content for message in last_call)

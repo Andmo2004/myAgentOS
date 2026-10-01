@@ -53,6 +53,23 @@ MessageBlock.tool, .chat-message.-system, .chat-message.-tool {
     display: none;
 }
 
+.chat-copy {
+    width: auto;
+    min-width: 8;
+    height: 1;
+    min-height: 1;
+    margin-top: 1;
+    padding: 0 1;
+    border: none;
+    background: transparent;
+    color: $mya-muted;
+}
+
+.chat-copy:hover {
+    background: $surface;
+    color: $primary;
+}
+
 /* Cada respuesta conserva el color del modelo que la generó */
 MessageBlock.agent.p-mya, .chat-message.-mya.p-mya, .chat-message.-agent.p-mya, .chat-message.p-mya       { border-left: outer $p-mya; }
 MessageBlock.agent.p-mock, .chat-message.-mya.p-mock, .chat-message.-agent.p-mock, .chat-message.p-mock     { border-left: outer $p-mock; }
