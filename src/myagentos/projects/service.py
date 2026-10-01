@@ -6,6 +6,7 @@ docs/agentic-os-feature-project-manager-explorer.md.
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import re
 import subprocess
@@ -341,12 +342,101 @@ class ProjectManagerService:
             except OSError as exc:
                 logger.warning("Could not create vault dir in %s: %s", root, exc)
 
+        # 5. Check & update .gitignore in project root
+        gitignore_res = cls.ensure_gitignore_entries(root)
+        checked_items.append(".gitignore")
+        if gitignore_res.get("added"):
+            created_items.append(f".gitignore ({', '.join(gitignore_res['added'])})")
+
         return {
             "status": "ok",
             "project_root": str(root),
             "checked": checked_items,
             "created": created_items,
+            "gitignore": gitignore_res,
         }
+
+    @classmethod
+    def ensure_gitignore_entries(
+        cls,
+        project_root: Path | str,
+        entries: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Ensure that Mya project directories and files are ignored in .gitignore."""
+        root = Path(project_root).resolve()
+        if not root.is_dir():
+            return {"status": "error", "reason": f"Path is not a directory: {root}"}
+
+        target_entries = entries or [
+            ".myagentos/",
+            ".mya/",
+            "MYA.md",
+            "MYA.md.bak",
+        ]
+
+        gitignore_path = root / ".gitignore"
+        patterns: list[str] = []
+
+        if gitignore_path.is_file():
+            try:
+                content = gitignore_path.read_text(encoding="utf-8")
+                for line in content.splitlines():
+                    stripped = line.strip()
+                    if stripped and not stripped.startswith("#"):
+                        patterns.append(stripped)
+            except OSError as exc:
+                logger.warning("Could not read .gitignore in %s: %s", root, exc)
+
+        missing_entries: list[str] = []
+        for entry in target_entries:
+            entry_clean = entry.rstrip("/")
+            is_covered = False
+            for pat in patterns:
+                pat_clean = pat.rstrip("/")
+                if pat_clean.lower() == entry_clean.lower():
+                    is_covered = True
+                    break
+                if fnmatch.fnmatch(entry.lower(), pat.lower()) or fnmatch.fnmatch(
+                    entry_clean.lower(), pat_clean.lower()
+                ):
+                    is_covered = True
+                    break
+            if not is_covered:
+                missing_entries.append(entry)
+
+        if not missing_entries:
+            return {
+                "status": "ok",
+                "added": [],
+                "already_present": target_entries,
+                "gitignore_path": str(gitignore_path),
+            }
+
+        try:
+            append_lines: list[str] = []
+            if gitignore_path.is_file() and gitignore_path.stat().st_size > 0:
+                raw = gitignore_path.read_text(encoding="utf-8")
+                if not raw.endswith("\n\n"):
+                    if not raw.endswith("\n"):
+                        append_lines.append("")
+                    append_lines.append("")
+
+            append_lines.append("# Mya / Agentic OS")
+            append_lines.extend(missing_entries)
+            append_lines.append("")
+
+            with gitignore_path.open("a", encoding="utf-8") as f:
+                f.write("\n".join(append_lines))
+
+            return {
+                "status": "ok",
+                "added": missing_entries,
+                "already_present": [e for e in target_entries if e not in missing_entries],
+                "gitignore_path": str(gitignore_path),
+            }
+        except OSError as exc:
+            logger.warning("Could not update .gitignore in %s: %s", root, exc)
+            return {"status": "error", "reason": str(exc)}
 
     @classmethod
     def reset_project_mya_environment(
@@ -371,7 +461,7 @@ class ProjectManagerService:
             backup_path = root / "MYA.md.bak"
             try:
                 backup_path.write_bytes(mya_file.read_bytes())
-                backup_created = str(backup_path.name)
+                backup_created = backup_path.name
                 mya_file.unlink()
             except OSError as exc:
                 logger.warning("Could not backup existing MYA.md in %s: %s", root, exc)

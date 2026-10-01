@@ -229,3 +229,48 @@ def test_reset_project_mya_environment_creates_backup(tmp_path: Path):
     assert "Reset Repo" in new_mya.read_text(encoding="utf-8")
     assert "## Rules" in new_mya.read_text(encoding="utf-8")
 
+
+def test_ensure_gitignore_creates_file_and_appends_entries(tmp_path: Path):
+    """Ensure .gitignore creates missing file and appends Mya entries."""
+    repo = tmp_path / "repo-gitignore"
+    repo.mkdir()
+
+    # 1. No .gitignore initially
+    res = ProjectManagerService.ensure_gitignore_entries(repo)
+    assert res["status"] == "ok"
+    assert len(res["added"]) == 4
+    assert (repo / ".gitignore").is_file()
+    content = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert ".myagentos/" in content
+    assert ".mya/" in content
+    assert "MYA.md" in content
+    assert "MYA.md.bak" in content
+
+    # 2. Re-running should detect everything as already present
+    res2 = ProjectManagerService.ensure_gitignore_entries(repo)
+    assert res2["status"] == "ok"
+    assert len(res2["added"]) == 0
+    assert len(res2["already_present"]) == 4
+
+
+def test_ensure_gitignore_appends_only_missing_and_respects_globs(tmp_path: Path):
+    """Ensure .gitignore appends only missing entries without duplicating existing or glob-covered items."""
+    repo = tmp_path / "repo-partial-gitignore"
+    repo.mkdir()
+    (repo / ".gitignore").write_text("build/\n.myagentos/\nmya*.md\n", encoding="utf-8")
+
+    res = ProjectManagerService.ensure_gitignore_entries(repo)
+    assert res["status"] == "ok"
+    # .myagentos/ is exact match; MYA.md matches mya*.md glob
+    # Only .mya/ and MYA.md.bak should be missing
+    assert ".mya/" in res["added"]
+    assert "MYA.md.bak" in res["added"]
+    assert "MYA.md" not in res["added"]
+    assert ".myagentos/" not in res["added"]
+
+    content = (repo / ".gitignore").read_text(encoding="utf-8")
+    assert "build/" in content
+    assert ".mya/" in content
+    assert "MYA.md.bak" in content
+
+

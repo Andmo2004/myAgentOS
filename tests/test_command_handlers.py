@@ -102,6 +102,8 @@ async def test_init_command_creates_and_resets_environment():
         assert (temp_dir / "MYA.md").is_file()
         assert (temp_dir / ".mya" / "skills").is_dir()
         assert (temp_dir / ".myagentos" / "memory").is_dir()
+        assert (temp_dir / ".gitignore").is_file()
+        assert ".myagentos/" in (temp_dir / ".gitignore").read_text(encoding="utf-8")
 
         # 2. Modify MYA.md
         (temp_dir / "MYA.md").write_text("# Custom rules\n- Rule 42\n", encoding="utf-8")

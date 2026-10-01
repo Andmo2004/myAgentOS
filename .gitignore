@@ -55,3 +55,8 @@ Thumbs.db
 .env.local
 *.pem
 *.key
+
+# Mya / Agentic OS
+.mya/
+MYA.md.bak
+
