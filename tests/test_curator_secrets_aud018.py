@@ -248,7 +248,7 @@ def test_aud018_e2e_pipeline_zero_secrets_leakage(tmp_path: Path) -> None:
     assert SAMPLE_PRIVATE_KEY not in report_dump
 
     # Check 4: Staged knowledge notes in _inbox/ must NOT contain synthetic secrets
-    inbox_notes = list((tmp_path / ".myagentos" / "vault" / "projects").glob("**/_inbox/*.md"))
+    inbox_notes = list((tmp_path / ".myagentos" / "memory" / "_inbox").glob("**/*.md"))
     for note_path in inbox_notes:
         note_content = note_path.read_text(encoding="utf-8")
         assert SAMPLE_API_KEY not in note_content

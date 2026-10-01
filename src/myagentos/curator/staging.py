@@ -25,18 +25,43 @@ StagingOverwriteViolation = StagingOverwriteViolationError
 
 
 class NoteStagingManager:
-    """Manages the isolated staging inbox at .myagentos/vault/projects/{project_id}/_inbox/."""
+    """Stages Curator notes and publishes verified notes into project-local memory."""
+
+    _safe_component = re.compile(r"[^a-zA-Z0-9_-]")
 
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root.resolve()
         self._job_note_counts: dict[str, int] = {}
 
     def get_inbox_path(self, project_id: str = "default") -> Path:
-        """Returns the isolated inbox directory for a given project (§22.3)."""
-        safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", project_id)
-        inbox = self.repo_root / ".myagentos" / "vault" / "projects" / safe_id / "_inbox"
+        """Return the project's isolated memory inbox (§22.3)."""
+        safe_id = self._safe_component.sub("_", project_id)
+        inbox = self.repo_root / ".myagentos" / "memory" / "_inbox" / safe_id
+        try:
+            inbox.parent.resolve().relative_to(self.repo_root)
+        except (OSError, ValueError) as exc:
+            raise ValueError("Project memory inbox escapes the repository root") from exc
         inbox.mkdir(parents=True, exist_ok=True)
+        self._verify_project_path(inbox)
         return inbox
+
+    def get_project_memory_path(self, project_id: str = "default") -> Path:
+        """Return the canonical note directory for one project in this repository."""
+        safe_id = self._safe_component.sub("_", project_id)
+        notes = self.repo_root / ".myagentos" / "memory" / "projects" / safe_id / "notes"
+        try:
+            notes.parent.resolve().relative_to(self.repo_root)
+        except (OSError, ValueError) as exc:
+            raise ValueError("Canonical project memory escapes the repository root") from exc
+        notes.mkdir(parents=True, exist_ok=True)
+        self._verify_project_path(notes)
+        return notes
+
+    def _verify_project_path(self, path: Path) -> None:
+        try:
+            path.resolve().relative_to(self.repo_root)
+        except (OSError, ValueError) as exc:
+            raise ValueError("Project memory path escapes the repository root") from exc
 
     def propose_project_note(self, note: ProjectNote) -> Path:
         """Restricted MCP tool implementation (§22.3):
@@ -60,7 +85,8 @@ class NoteStagingManager:
             )
 
         inbox_dir = self.get_inbox_path(note.project_id)
-        note_filename = f"{note.note_id}.md"
+        safe_note_id = self._safe_component.sub("_", note.note_id)
+        note_filename = f"{safe_note_id}.md"
         target_file = inbox_dir / note_filename
 
         if target_file.exists():
@@ -71,6 +97,34 @@ class NoteStagingManager:
         target_file.write_text(content, encoding="utf-8")
         self._job_note_counts[job_id] = count + 1
 
+        return target_file
+
+    def publish_verified_note(self, note: ProjectNote) -> Path:
+        """Publish only a validated note to canonical project memory, create-only."""
+        from myagentos.core.models.knowledge import NoteStatus
+
+        if note.status != NoteStatus.VERIFIED:
+            raise ValueError("Only verified Curator notes may enter canonical project memory")
+        content = note.to_markdown()
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > MAX_NOTE_SIZE_BYTES:
+            raise StagingLimitExceeded(
+                f"Note {note.note_id} exceeds maximum size limit of {MAX_NOTE_SIZE_BYTES} bytes"
+            )
+
+        safe_note_id = self._safe_component.sub("_", note.note_id)
+        target_file = self.get_project_memory_path(note.project_id) / f"{safe_note_id}.md"
+        try:
+            with target_file.open("x", encoding="utf-8") as stream:
+                stream.write(content)
+        except FileExistsError as exc:
+            raise StagingOverwriteViolation(
+                f"Canonical note '{target_file.name}' already exists"
+            ) from exc
+        try:
+            target_file.chmod(0o600)
+        except OSError:
+            pass
         return target_file
 
     def list_inbox_notes(self, project_id: str = "default") -> list[Path]:

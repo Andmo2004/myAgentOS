@@ -134,6 +134,7 @@ class ProjectManagerService:
         )
 
         self.registry.save_project(project)
+        self._initialize_project_memory(root)
         self._emit_event(
             project_id=p_id,
             event_name=EventName.PROJECT_CREATED,
@@ -183,12 +184,24 @@ class ProjectManagerService:
         )
 
         self.registry.save_project(project)
+        self._initialize_project_memory(root)
         self._emit_event(
             project_id=p_id,
             event_name=EventName.PROJECT_ADDED,
             payload={"name": proj_name, "path": str(root)},
         )
         return project
+
+    @staticmethod
+    def _initialize_project_memory(project_root: Path) -> Path:
+        """Create the canonical, project-local memory root without touching legacy data."""
+        memory_root = project_root / ".myagentos" / "memory"
+        memory_root.mkdir(parents=True, exist_ok=True)
+        try:
+            memory_root.chmod(0o700)
+        except OSError:
+            pass
+        return memory_root
 
     def clone_repository(
         self,

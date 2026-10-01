@@ -161,17 +161,26 @@ class CuratorAgent:
 
         # 2. Deterministic validation of anchors and secrets (§22.4)
         validated_note = self.validator.validate_and_transition(initial_note)
-        validated_note = validated_note.model_copy(update={"file_path": str(staged_file)})
+        staged_note = validated_note.model_copy(update={"file_path": str(staged_file)})
+        staged_file.write_text(staged_note.to_markdown(), encoding="utf-8")
 
-        # Update staged file with final validation status
-        staged_file.write_text(validated_note.to_markdown(), encoding="utf-8")
+        if validated_note.status == NoteStatus.VERIFIED:
+            canonical_file = self.staging_manager.publish_verified_note(validated_note)
+            validated_note = validated_note.model_copy(update={"file_path": str(canonical_file)})
+        else:
+            validated_note = staged_note
+
+        location = (
+            "project memory" if validated_note.status == NoteStatus.VERIFIED else "staging inbox"
+        )
 
         return CuratorResult(
             job_id=input_data.job_id,
             notes=[validated_note],
             success=True,
             summary=(
-                f"Synthesized note {note_id} in staging (status: {validated_note.status.value})"
+                f"Synthesized note {note_id} "
+                f"(status: {validated_note.status.value}, {location})"
             ),
             model_used=self.model_id,
             tokens_used=tokens_used,

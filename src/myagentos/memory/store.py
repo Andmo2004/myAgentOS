@@ -167,9 +167,10 @@ class JsonlMemoryStore:
 
 
 class ProjectNoteMemoryStore:
-    """Read-only retrieval of verified Curator notes from a project's existing vault."""
+    """Read verified Curator notes from canonical project-local memory."""
 
     _project_id_pattern = re.compile(r"[^a-zA-Z0-9_-]")
+    _note_id_pattern = re.compile(r"[^a-zA-Z0-9_.-]")
 
     def __init__(self, project_roots: dict[str, Path] | None = None) -> None:
         self.project_roots = project_roots or {}
@@ -191,18 +192,23 @@ class ProjectNoteMemoryStore:
         root = self.project_roots.get(project_id)
         if root is None:
             return []
-        safe_project_id = self._project_id_pattern.sub("_", project_id)
-        vault = root / ".myagentos" / "vault" / "projects" / safe_project_id
-        if not vault.is_dir():
+        canonical_dir = self.canonical_note_dir(root, project_id)
+        self.migrate_legacy_notes(root, project_id)
+        if not canonical_dir.is_dir():
             return []
-        vault_root = vault.resolve()
+        try:
+            canonical_dir.resolve().relative_to(root.resolve())
+        except (OSError, ValueError):
+            logger.warning("Canonical project memory path escapes its project root")
+            return []
+        canonical_root = canonical_dir.resolve()
         records: list[MemoryRecord] = []
-        for note_path in sorted(vault.rglob("*.md"))[:500]:
+        for note_path in sorted(canonical_dir.glob("*.md"))[:500]:
             try:
                 if note_path.stat().st_size > 16_384:
                     logger.warning("Skipping oversized project memory note")
                     continue
-                note_path.resolve().relative_to(vault_root)
+                note_path.resolve().relative_to(canonical_root)
                 text = note_path.read_text(encoding="utf-8")
             except (OSError, ValueError):
                 continue
@@ -230,7 +236,7 @@ class ProjectNoteMemoryStore:
                     user_id=user_id,
                     project_id=project_id,
                     session_id=None,
-                    namespace_id=f"/vault/Proyectos/{project_id}",
+                    namespace_id=f".myagentos/memory/projects/{project_id}",
                     content=body,
                     status="verified",
                     classification=classification,
@@ -247,6 +253,81 @@ class ProjectNoteMemoryStore:
                 )
             )
         return _rank_records(records, query)[:limit]
+
+    @classmethod
+    def canonical_note_dir(cls, project_root: Path, project_id: str) -> Path:
+        safe_project_id = cls._project_id_pattern.sub("_", project_id)
+        return project_root / ".myagentos" / "memory" / "projects" / safe_project_id / "notes"
+
+    @classmethod
+    def migrate_legacy_notes(cls, project_root: Path, project_id: str) -> int:
+        """Copy verified legacy vault notes to canonical memory without deleting originals."""
+        safe_project_id = cls._project_id_pattern.sub("_", project_id)
+        legacy_root = project_root / ".myagentos" / "vault" / "projects" / safe_project_id
+        if not legacy_root.is_dir():
+            return 0
+        project_root_resolved = project_root.resolve()
+        try:
+            legacy_root_resolved = legacy_root.resolve()
+            legacy_root_resolved.relative_to(project_root_resolved)
+        except (OSError, ValueError):
+            logger.warning("Legacy project memory path escapes its project root")
+            return 0
+        canonical_dir = cls.canonical_note_dir(project_root, project_id)
+        try:
+            canonical_dir.parent.resolve().relative_to(project_root_resolved)
+        except (OSError, ValueError):
+            logger.warning("Canonical project memory path escapes its project root")
+            return 0
+        canonical_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            canonical_dir.resolve().relative_to(project_root_resolved)
+        except (OSError, ValueError):
+            logger.warning("Canonical project memory path escapes its project root")
+            return 0
+        try:
+            canonical_dir.chmod(0o700)
+        except OSError:
+            pass
+
+        migrated = 0
+        for source in sorted(legacy_root.rglob("*.md"))[:500]:
+            try:
+                if source.stat().st_size > 16_384:
+                    continue
+                source.resolve().relative_to(legacy_root_resolved)
+                text = source.read_text(encoding="utf-8")
+            except (OSError, ValueError):
+                continue
+            metadata, _ = _parse_note(text)
+            if metadata.get("project_id") != project_id:
+                continue
+            if metadata.get("status") != "verified":
+                continue
+            if metadata.get("classification", "internal").lower() not in {"public", "internal"}:
+                continue
+
+            raw_note_id = metadata.get("note_id", source.stem)
+            safe_note_id = cls._note_id_pattern.sub("_", raw_note_id)
+            if not safe_note_id:
+                continue
+            target = canonical_dir / f"{safe_note_id}.md"
+            try:
+                with target.open("x", encoding="utf-8") as stream:
+                    stream.write(text)
+                target.chmod(0o600)
+                migrated += 1
+            except FileExistsError:
+                continue
+            except OSError:
+                logger.exception("Could not migrate a verified legacy project note")
+        if migrated:
+            logger.info(
+                "memory.project.migration.completed project_hash=%s migrated_count=%d",
+                hashlib.sha256(project_id.encode("utf-8")).hexdigest()[:12],
+                migrated,
+            )
+        return migrated
 
 
 def _parse_note(text: str) -> tuple[dict[str, str], str]:

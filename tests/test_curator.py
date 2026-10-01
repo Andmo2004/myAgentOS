@@ -94,6 +94,22 @@ def test_note_staging_create_only_and_limits(tmp_path: Path) -> None:
         manager.propose_project_note(oversized_note)
 
 
+def test_note_staging_rejects_memory_symlink_outside_project(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    mya_dir = project_root / ".myagentos"
+    mya_dir.mkdir()
+    (mya_dir / "memory").symlink_to(external, target_is_directory=True)
+
+    manager = NoteStagingManager(project_root)
+
+    with pytest.raises(ValueError, match="escapes"):
+        manager.get_inbox_path("project-a")
+    assert list(external.iterdir()) == []
+
+
 def test_deterministic_note_validator(tmp_path: Path) -> None:
     """Verifies anchor existence and secret scanning transitions (§22.4)."""
     src_dir = tmp_path / "src"
@@ -238,6 +254,8 @@ def test_curator_agent_flow_and_non_blocking(tmp_path: Path) -> None:
     assert note.anchors == ["src/calc.py:add@head"]
     assert note.file_path is not None
     assert Path(note.file_path).exists()
+    assert ".myagentos/memory/projects/test-app/notes/" in note.file_path
+    assert "_inbox" not in note.file_path
 
 
 def test_pipeline_e2e_curator_integration(tmp_path: Path) -> None:

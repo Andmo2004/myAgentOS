@@ -19,7 +19,6 @@ SUBDIRECTORIES: tuple[str, ...] = (
     "projects/registry",
     "memory/user",
     "memory/mya",
-    "memory/projects",
     "telemetry",
     "cache",
     "runtime/locks",

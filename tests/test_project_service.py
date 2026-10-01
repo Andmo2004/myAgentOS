@@ -28,6 +28,7 @@ def test_create_and_add_project(tmp_path: Path) -> None:
     assert p1.state == ProjectState.ACTIVE
     assert proj_dir.is_dir()
     assert (proj_dir / ".git").is_dir()
+    assert (proj_dir / ".myagentos" / "memory").is_dir()
     assert p1.mya_namespace_id == f"/vault/Proyectos/{p1.project_id}"
 
     # Verify event
@@ -44,6 +45,7 @@ def test_create_and_add_project(tmp_path: Path) -> None:
 
     assert p2.name == "existing-service"
     assert p2.state == ProjectState.ACTIVE
+    assert (existing_dir / ".myagentos" / "memory").is_dir()
 
     # 3. Duplicate protection
     with pytest.raises(ValueError, match="already registered"):

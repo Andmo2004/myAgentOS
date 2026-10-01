@@ -137,6 +137,58 @@ def test_project_memory_isolated_and_verified_notes_only(tmp_path: Path) -> None
     assert all(record.status == "verified" for record in context_a.project)
     assert all(record.trust == "untrusted" for record in context_a.project)
     assert all("provider" not in record.__dict__ for record in context_a.records)
+    canonical_notes = root_a / ".myagentos" / "memory" / "projects" / "project-a" / "notes"
+    assert (canonical_notes / "uses.md").is_file()
+    assert (root_a / ".myagentos" / "vault" / "projects" / "project-a" / "uses.md").is_file()
+
+
+def test_legacy_project_note_migration_is_idempotent_and_filters_status(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    registry = ProjectRegistry(tmp_path / "projects.json")
+    _registered_project(registry, "project-a", root)
+    legacy = root / ".myagentos" / "vault" / "projects" / "project-a" / "_inbox"
+    legacy.mkdir(parents=True)
+    for note_id, status, classification in (
+        ("verified-note", "verified", "internal"),
+        ("proposed-note", "proposed", "internal"),
+        ("stale-note", "stale", "internal"),
+        ("secret-note", "verified", "secret"),
+    ):
+        (legacy / f"{note_id}.md").write_text(
+            "---\n"
+            f'note_id: "{note_id}"\n'
+            'project_id: "project-a"\n'
+            f"status: {status}\n"
+            'trust: "untrusted"\n'
+            f"classification: {classification}\n"
+            'provenance:\n  model: "legacy-model"\n'
+            "---\n\n"
+            f"# {note_id}\n\n## Decisions\n- verified architecture fact {note_id}\n",
+            encoding="utf-8",
+        )
+
+    manager = SharedMemoryManager(
+        tmp_path / "memory",
+        project_service=ProjectManagerService(registry=registry),
+    )
+    session = Session(
+        user_id="user-a",
+        session_id="session-a",
+        project_id="project-a",
+        repo_root=root,
+    )
+    first = manager.build_context(session=session, query="What architecture was decided?")
+    second = manager.build_context(session=session, query="What architecture was decided?")
+    canonical = root / ".myagentos" / "memory" / "projects" / "project-a" / "notes"
+
+    assert "verified-note" in first.formatted
+    assert "proposed-note" not in first.formatted
+    assert "stale-note" not in first.formatted
+    assert "secret-note" not in first.formatted
+    assert len(list(canonical.glob("*.md"))) == 1
+    assert first.formatted == second.formatted
+    assert (legacy / "verified-note.md").is_file()
 
 
 def test_user_memory_requires_explicit_confirmation_and_rejects_secrets(tmp_path: Path) -> None:

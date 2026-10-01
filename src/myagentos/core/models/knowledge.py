@@ -36,7 +36,7 @@ class NoteProvenance(BaseModel):
 
 
 class ProjectNote(BaseModel):
-    """Structured knowledge note managed in staging/canonical vault (§22.3, §22.6)."""
+    """Structured knowledge note managed in staging/canonical project memory (§22.3, §22.6)."""
 
     model_config = ConfigDict(frozen=True)
 
