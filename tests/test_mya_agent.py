@@ -301,13 +301,19 @@ class TestMyaVoiceAndConversation:
         mya_agent.converse(
             "¿Tienes contexto sobre esta aplicación?",
             session=session,
-            history=[{"role": "assistant", "content": "Hola."}],
+            history=[
+                {"role": "user", "content": "Hola."},
+                {"role": "assistant", "content": "Hola, ¿qué necesitas?"},
+            ],
         )
 
         messages = mock_gateway.adapters["mock"].call_history[-1]
         assert any("name: myAgentOS" in message.content for message in messages)
         assert any("branch: main" in message.content for message in messages)
-        assert any(message.content == "Hola." for message in messages)
+        session_memory = next(
+            message.content for message in messages if '<memory scope="session"' in message.content
+        )
+        assert "Hola." in session_memory
         assert any(
             "Do not invent projects, tasks or repository facts." in message.content
             for message in messages

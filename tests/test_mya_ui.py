@@ -185,8 +185,9 @@ async def test_mya_app_layout_geometry_and_visibility() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mya_app_slash_clear() -> None:
+async def test_mya_app_slash_clear(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify /clear keeps welcome banner and clears chat messages."""
+    monkeypatch.setenv("MYA_MODEL", "mock-mya")
     app = MyaApp()
     async with app.run_test(size=(80, 24)) as pilot:
         inp = pilot.app.query_one("#prompt-input", Input)

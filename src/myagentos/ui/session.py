@@ -5,6 +5,10 @@ Authority remains in the Event Store, Job Store, and Project Knowledge.
 The session is a local convenience for the UI process.
 """
 
+import getpass
+import hashlib
+import json
+import os
 import subprocess
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +17,55 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from myagentos.categorization.models import ProjectProfile
+
+
+def _local_user_id() -> str:
+    username = getpass.getuser().strip().lower() or "local-user"
+    return "local-" + hashlib.sha256(username.encode("utf-8")).hexdigest()[:20]
+
+
+def _active_session_id(project_key: str) -> str:
+    """Resume this user's latest session for the same project across restarts."""
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return str(uuid.uuid4())[:8]
+    from myagentos.config.paths import resolve_mya_home
+
+    active_path = resolve_mya_home() / "memory" / "active_session.json"
+    user_id = _local_user_id()
+    hashed_project_key = hashlib.sha256(project_key.encode("utf-8")).hexdigest()
+    try:
+        if active_path.is_file():
+            active = json.loads(active_path.read_text(encoding="utf-8"))
+            if (
+                active.get("user_id") == user_id
+                and active.get("project_key_hash") == hashed_project_key
+            ):
+                return str(active["session_id"])
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+    session_id = str(uuid.uuid4())[:8]
+    try:
+        active_path.parent.mkdir(parents=True, exist_ok=True)
+        active_path.write_text(
+            json.dumps(
+                {
+                    "user_id": user_id,
+                    "project_key_hash": hashed_project_key,
+                    "session_id": session_id,
+                },
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        try:
+            active_path.parent.chmod(0o700)
+            active_path.chmod(0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+    return session_id
 
 
 class GitInfo(BaseModel):
@@ -33,6 +86,7 @@ class Session(BaseModel):
     model_config = ConfigDict(frozen=False)
 
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    user_id: str = Field(default_factory=_local_user_id)
     project_id: str = ""
     repository: str = ""
     branch: str = ""
@@ -123,7 +177,11 @@ def create_session(repo_path: Path | None = None) -> Session:
     root = (repo_path or Path.cwd()).resolve()
     git_info = detect_git_info(root)
 
-    session = Session(repo_root=root)
+    session = Session(
+        user_id=_local_user_id(),
+        session_id=_active_session_id(str(root)),
+        repo_root=root,
+    )
 
     if git_info:
         session.project_id = git_info.repository

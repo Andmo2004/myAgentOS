@@ -48,8 +48,8 @@ from myagentos.ui.theme.mya_theme import (
     MUTED,
     MYA_RICH_THEME,
     PROVIDERS,
-    SAND,
     SAGE,
+    SAND,
     StatusLine,
     Thinking,
     Welcome,
@@ -388,7 +388,9 @@ class MyaApp(App[None]):
                 try:
                     ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
                     if config.ui.theme != "default":
-                        self.theme = PRESENTATION_TO_TEXTUAL.get(config.ui.theme, f"mya-{self.provider}")
+                        self.theme = PRESENTATION_TO_TEXTUAL.get(
+                            config.ui.theme, f"mya-{self.provider}"
+                        )
                 except Exception:
                     pass
 
@@ -417,7 +419,9 @@ class MyaApp(App[None]):
             if getattr(config, "ui", None) and config.ui.theme and config.ui.theme != "default":
                 try:
                     ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
-                    self.theme = PRESENTATION_TO_TEXTUAL.get(config.ui.theme, f"mya-{self.provider}")
+                    self.theme = PRESENTATION_TO_TEXTUAL.get(
+                        config.ui.theme, f"mya-{self.provider}"
+                    )
                 except Exception:
                     pass
 
@@ -1169,7 +1173,7 @@ class MyaApp(App[None]):
         # Guarded check: Is it in restricted or policy filtered models, or credential invalid? (§12)
         if arg_lower in [m.lower() for m in effective.restricted_models]:
             self._append_mya_message(
-                f"{badge} [bold red]No puedes utilizar \"{arg}\" con la credencial activa.[/bold red]\n\n"
+                f'{badge} [bold red]No puedes utilizar "{arg}" con la credencial activa.[/bold red]\n\n'
                 f"Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
                 f"Motivo:\nLa credencial actual no tiene acceso a este modelo."
             )
@@ -1177,7 +1181,7 @@ class MyaApp(App[None]):
 
         if arg_lower in [m.lower() for m in effective.policy_filtered_models]:
             self._append_mya_message(
-                f"{badge} [bold red]No puedes utilizar \"{arg}\" con la credencial activa.[/bold red]\n\n"
+                f'{badge} [bold red]No puedes utilizar "{arg}" con la credencial activa.[/bold red]\n\n'
                 f"Estado:\n[bold yellow]FILTRADO[/bold yellow]\n\n"
                 f"Motivo:\nEl modelo está retirado o filtrado por política del sistema."
             )
@@ -1187,19 +1191,17 @@ class MyaApp(App[None]):
 
         if effective.credential_status in (CredentialStatus.INVALID, CredentialStatus.REVOKED):
             self._append_mya_message(
-                f"{badge} [bold red]No puedes utilizar \"{arg}\" con la credencial activa.[/bold red]\n\n"
+                f'{badge} [bold red]No puedes utilizar "{arg}" con la credencial activa.[/bold red]\n\n'
                 f"Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
                 f"Motivo:\nLa credencial para '{target_provider}' no es válida o fue revocada."
             )
             return
 
         # Otherwise, treat as filter query (§11)
-        query_matches = [
-            m for m in effective.available_models if arg_lower in m.lower()
-        ]
+        query_matches = [m for m in effective.available_models if arg_lower in m.lower()]
         if query_matches:
             lines = [
-                f"{badge} [bold]MODELOS DISPONIBLES[/bold] [dim](filtro: \"{arg}\")[/dim]\n",
+                f'{badge} [bold]MODELOS DISPONIBLES[/bold] [dim](filtro: "{arg}")[/dim]\n',
                 f"  • Provider:   [bold]{target_provider.capitalize()}[/bold]\n",
             ]
             for mid in query_matches:
@@ -1225,13 +1227,50 @@ class MyaApp(App[None]):
         """Handle conversational or task intent input from the user."""
         text_lower = text.lower().strip()
         actionable_markers = [
-            "añade", "añadir", "anade", "agrega", "agregar", "crea", "crear",
-            "corrige", "corregir", "arregla", "arreglar", "cambia", "cambiar",
-            "modifica", "modificar", "elimina", "eliminar", "borra", "borrar",
-            "implementa", "implementar", "refactoriza", "refactorizar", "optimiza",
-            "optimizar", "instala", "instalar", "actualiza", "actualizar", "configura",
-            "configurar", "haz", "make", "add ", "create ", "fix ", "change ", "modify ",
-            "delete ", "implement ", "refactor ", "optimize ", "install ", "update ",
+            "añade",
+            "añadir",
+            "anade",
+            "agrega",
+            "agregar",
+            "crea",
+            "crear",
+            "corrige",
+            "corregir",
+            "arregla",
+            "arreglar",
+            "cambia",
+            "cambiar",
+            "modifica",
+            "modificar",
+            "elimina",
+            "eliminar",
+            "borra",
+            "borrar",
+            "implementa",
+            "implementar",
+            "refactoriza",
+            "refactorizar",
+            "optimiza",
+            "optimizar",
+            "instala",
+            "instalar",
+            "actualiza",
+            "actualizar",
+            "configura",
+            "configurar",
+            "haz",
+            "make",
+            "add ",
+            "create ",
+            "fix ",
+            "change ",
+            "modify ",
+            "delete ",
+            "implement ",
+            "refactor ",
+            "optimize ",
+            "install ",
+            "update ",
             "configure ",
         ]
         is_action_request = any(marker in text_lower for marker in actionable_markers)
@@ -1268,10 +1307,11 @@ class MyaApp(App[None]):
 
     def _record_conversation_turn(self, user_text: str, assistant_text: str) -> None:
         """Keep recent natural-language turns available to Mya's conversation channel."""
+        project_id = self.mya_agent.memory_manager.project_id_for_session(self.session)
         self._conversation_history.extend(
             [
-                {"role": "user", "content": user_text},
-                {"role": "assistant", "content": assistant_text},
+                {"role": "user", "content": user_text, "project_id": project_id or ""},
+                {"role": "assistant", "content": assistant_text, "project_id": project_id or ""},
             ]
         )
         del self._conversation_history[:-12]

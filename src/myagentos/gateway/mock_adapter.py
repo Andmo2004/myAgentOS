@@ -1,5 +1,6 @@
 """Mock provider adapter for reproducible and offline testing (§17.1)."""
 
+import html
 import re
 from typing import Any
 
@@ -134,6 +135,9 @@ class MockProviderAdapter(ProviderAdapter):
         active_tags = ""
         active_languages = ""
         active_state = ""
+        trashed_names = re.findall(r"(?m)^- name: ([^;\n]+); state: trashed", context)
+        trash_available = "## Trashed projects (" in context
+        trash_empty = "Trash is empty" in context
         if active_block:
             active_name = re.search(r"(?m)^name: (.+)$", active_block.group(1))
             active_state = re.search(r"(?m)^project_state: (.+)$", active_block.group(1))
@@ -143,6 +147,44 @@ class MockProviderAdapter(ProviderAdapter):
             active_state = active_state.group(1) if active_state else ""
             active_tags = active_tags.group(1) if active_tags else ""
             active_languages = active_languages.group(1) if active_languages else ""
+
+        memory_records = re.findall(
+            r'<memory scope="(user|project|session)"[^>]*>(.*?)</memory>',
+            context,
+            re.DOTALL,
+        )
+        scoped_memory = [(scope, html.unescape(content)) for scope, content in memory_records]
+
+        if any(
+            term in lower
+            for term in ("acabamos", "decidimos", "hace un momento", "según lo anterior")
+        ):
+            session_notes = [content for scope, content in scoped_memory if scope == "session"]
+            if session_notes:
+                return f"En esta conversación quedó anotado: {session_notes[-1]}"
+
+        if "papelera" in lower or "trash" in lower:
+            if not trash_available:
+                return "No puedo consultar la papelera en este momento."
+            if trash_empty:
+                return "La papelera está vacía."
+            names = ", ".join(trashed_names)
+            return f"En la papelera están: {names}. Los repositorios en disco permanecen intactos."
+
+        if any(
+            term in lower
+            for term in ("borra este proyecto", "elimina este proyecto", "delete this project")
+        ):
+            return (
+                "Por seguridad, yo no ejecuto eliminaciones de proyectos directamente. "
+                "Gestiona su ciclo de vida desde Project Manager; tus archivos en disco "
+                "nunca se borran."
+            )
+
+        if any(term in lower for term in ("preferencia", "prefiero", "idioma", "cómo prefiero")):
+            user_notes = [content for scope, content in scoped_memory if scope == "user"]
+            if user_notes:
+                return f"Según tu preferencia guardada: {user_notes[0]}"
 
         if any(
             term in lower
@@ -216,12 +258,25 @@ class MockProviderAdapter(ProviderAdapter):
                     return f"El proyecto activo es {active_name}{state}{details}{stack}."
                 return "No tengo identificado un proyecto activo en la sesión actual."
             if not project_names:
-                return "Ahora mismo no tengo ningún proyecto registrado."
+                return "No tienes ningún proyecto registrado ahora mismo."
             active_note = f" El activo es {active_name}." if active_name != "unavailable" else ""
-            return (
-                f"Tengo {project_count} proyectos registrados: "
-                f"{', '.join(project_names)}.{active_note}"
-            )
+            project_word = "proyecto registrado" if project_count == 1 else "proyectos registrados"
+            return f"Tengo {project_count} {project_word}: {', '.join(project_names)}.{active_note}"
+        query_terms = {
+            token
+            for token in re.findall(r"[\w-]+", lower)
+            if len(token) > 3
+            and token not in {"este", "esta", "para", "sobre", "como", "qué", "que"}
+        }
+        for scope in ("session", "project", "user"):
+            scoped_matches = [
+                content
+                for record_scope, content in scoped_memory
+                if record_scope == scope
+                and query_terms.intersection(set(re.findall(r"[\w-]+", content.lower())))
+            ]
+            if scoped_matches:
+                return f"Según el contexto disponible: {scoped_matches[0]}"
         if any(term in lower for term in ("contexto", "sabes del", "sabes sobre", "qué sabes")):
             if active_name != "unavailable":
                 return f"Tengo contexto del proyecto activo {active_name}."

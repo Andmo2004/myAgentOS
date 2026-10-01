@@ -49,7 +49,7 @@ def test_mya_converse_project_queries(mya_agent, project_service, tmp_path: Path
 
     resp2 = mya_agent.converse("cuáles son mis proyectos")
     assert "SampleApp" in resp2
-    assert "1 proyecto(s) activo(s)" in resp2
+    assert "1 proyecto registrado" in resp2
 
     # 3. Trash query empty
     resp_trash1 = mya_agent.converse("qué hay en la papelera")

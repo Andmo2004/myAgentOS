@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +31,8 @@ from myagentos.core.models.event import EventActor, EventName
 from myagentos.core.store.event_store import EventStore
 from myagentos.gateway.base import LLMMessage
 from myagentos.gateway.client import ModelGateway
+from myagentos.memory.manager import SharedMemoryManager
+from myagentos.memory.models import MemoryContext
 from myagentos.mya.context import ConversationContext, ConversationContextService
 from myagentos.mya.dialogue import Question, QuestionBatch
 from myagentos.mya.explanations import translate_state
@@ -76,6 +81,7 @@ class MyaAgent:
         model_id: str = "mock-mya",
         event_store: EventStore | None = None,
         conversation_context_service: ConversationContextService | None = None,
+        memory_manager: SharedMemoryManager | None = None,
     ) -> None:
         self.gateway = gateway
         self.model_id = model_id
@@ -83,6 +89,17 @@ class MyaAgent:
         self.conversation_context_service = (
             conversation_context_service or ConversationContextService()
         )
+        self._test_memory_dir: tempfile.TemporaryDirectory[str] | None = None
+        if memory_manager is None:
+            from myagentos.config.paths import resolve_mya_home
+
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                self._test_memory_dir = tempfile.TemporaryDirectory(prefix="myagentos-test-memory-")
+                memory_root = Path(self._test_memory_dir.name)
+            else:
+                memory_root = resolve_mya_home() / "memory"
+            memory_manager = SharedMemoryManager(memory_root)
+        self.memory_manager = memory_manager
 
     def interpret(self, user_input: str, session: Session | None = None) -> InterpretResult:
         """Transform an explicit task request into a structured UserIntent."""
@@ -186,11 +203,17 @@ class MyaAgent:
             return "Aquí estoy. Dime qué tienes en mente."
 
         context = self.conversation_context_service.build_context(session, clean_input)
+        memory_context = self.memory_manager.build_context(
+            session=session,
+            query=clean_input,
+            base_context=context.to_prompt(),
+            history=history,
+        )
         messages = [
             LLMMessage(role="system", content=MYA_CONVERSE_PROMPT),
-            LLMMessage(role="system", content=context.to_prompt()),
+            LLMMessage(role="system", content=memory_context.formatted),
         ]
-        if history:
+        if history and session is None:
             messages.extend(
                 LLMMessage(role=item.get("role", "user"), content=item.get("content", ""))
                 for item in history[-6:]
@@ -205,11 +228,28 @@ class MyaAgent:
             )
             content = response.content.strip()
             if content:
+                self.memory_manager.record_session_turn(
+                    session=session,
+                    user_message=clean_input,
+                    assistant_message=content,
+                ) if session else None
                 return content
         except Exception as exc:
             logger.warning("Gateway call failed in MyaAgent.converse: %s", exc)
 
-        return self._generate_fallback_conversation(clean_input, context, history)
+        fallback = self._generate_fallback_conversation(
+            clean_input,
+            context,
+            history,
+            memory_context,
+        )
+        if session:
+            self.memory_manager.record_session_turn(
+                session=session,
+                user_message=clean_input,
+                assistant_message=fallback,
+            )
+        return fallback
 
     def explain(self, state: str, details: dict[str, Any] | None = None) -> str:
         """Explains an FSM state, transition or requirement following:
@@ -373,9 +413,56 @@ class MyaAgent:
         clean_input: str,
         context: ConversationContext,
         history: list[dict[str, str]] | None = None,
+        memory_context: MemoryContext | None = None,
     ) -> str:
         """Answer from verified context when the conversation provider is unavailable."""
         lower = clean_input.lower()
+        if "papelera" in lower or "trash" in lower:
+            if not context.trash_available:
+                return "No puedo consultar la papelera en este momento."
+            if not context.trashed_projects:
+                return "La papelera está vacía."
+            names = ", ".join(project.name for project in context.trashed_projects)
+            return f"En la papelera están: {names}. Los repositorios en disco permanecen intactos."
+
+        if any(
+            term in lower
+            for term in ("borra este proyecto", "elimina este proyecto", "delete this project")
+        ):
+            return (
+                "Por seguridad, yo no ejecuto eliminaciones de proyectos directamente. "
+                "Gestiona su ciclo de vida desde Project Manager; tus archivos en disco "
+                "nunca se borran."
+            )
+
+        if memory_context:
+            if any(term in lower for term in ("preferencia", "prefiero", "idioma")):
+                if memory_context.user:
+                    return f"Según tu preferencia guardada: {memory_context.user[0].content}"
+            if any(term in lower for term in ("acabamos", "decidimos", "hace un momento")):
+                if memory_context.session:
+                    return f"En esta sesión quedó anotado: {memory_context.session[0].content}"
+
+            query_terms = {
+                term
+                for term in re.findall(r"[\w-]+", lower)
+                if len(term) > 3
+                and term not in {"este", "esta", "para", "sobre", "como", "qué", "que"}
+            }
+            scopes = (
+                (memory_context.project, "del proyecto"),
+                (memory_context.session, "de esta sesión"),
+                (memory_context.user, "de tu memoria"),
+            )
+            for records, scope_label in scopes:
+                matching = [
+                    record
+                    for record in records
+                    if query_terms.intersection(set(re.findall(r"[\w-]+", record.content.lower())))
+                ]
+                if matching:
+                    return f"Según la memoria {scope_label}: {matching[0].content}"
+
         if any(
             term in lower
             for term in ("pendiente", "por hacer", "tareas", "backlog", "jobs abiertos")
@@ -449,12 +536,15 @@ class MyaAgent:
             if not context.projects_available:
                 return "No puedo consultar el registro de proyectos en este momento."
             if not context.projects:
-                return "Ahora mismo no tengo ningún proyecto registrado."
+                return "No tienes ningún proyecto registrado ahora mismo."
             names = ", ".join(project.name for project in context.projects[:8])
             active = (
                 f" El activo es {context.active_project.name}." if context.active_project else ""
             )
-            return f"Tengo {context.project_count} proyectos registrados: {names}.{active}"
+            project_word = (
+                "proyecto registrado" if context.project_count == 1 else "proyectos registrados"
+            )
+            return f"Tengo {context.project_count} {project_word}: {names}.{active}"
 
         if any(term in lower for term in ("contexto", "sabes del", "sabes sobre", "qué sabes")):
             if context.active_project:

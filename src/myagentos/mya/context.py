@@ -29,6 +29,8 @@ class ConversationContext:
     projects: tuple[ProjectFact, ...]
     projects_available: bool
     project_count: int
+    trashed_projects: tuple[ProjectFact, ...]
+    trash_available: bool
     branch: str | None
     commit: str | None
     working_tree_status: str | None
@@ -77,6 +79,16 @@ class ConversationContext:
                     f"{self.project_count - len(self.projects)}"
                 )
 
+        if self.trash_available:
+            lines.extend(["", f"## Trashed projects ({len(self.trashed_projects)})"])
+            if self.trashed_projects:
+                lines.extend(
+                    f"- name: {project.name}; state: {project.state}"
+                    for project in self.trashed_projects
+                )
+            else:
+                lines.append("Trash is empty")
+
         lines.extend(["", "## Work tracking"])
         if self.current_job_id:
             lines.append(f"Current session job: {self.current_job_id}")
@@ -95,8 +107,16 @@ class ConversationContextService:
         project_service: ProjectManagerService | None = None,
         max_projects: int = 20,
     ) -> None:
-        self.project_service = project_service or ProjectManagerService()
+        self._project_service = project_service
         self.max_projects = max_projects
+
+    @property
+    def project_service(self) -> ProjectManagerService:
+        if self._project_service is None:
+            from myagentos.projects.service import ProjectManagerService as ProjectServiceFactory
+
+            self._project_service = ProjectServiceFactory()
+        return self._project_service
 
     def build_context(
         self,
@@ -111,6 +131,16 @@ class ConversationContextService:
         except Exception:
             logger.exception("Could not load registered projects for Mya conversation")
             registered = None
+
+        trash_requested = any(
+            term in user_input.lower() for term in ("papelera", "trash", "trashed")
+        )
+        trashed: list[Project] | None = None
+        if trash_requested:
+            try:
+                trashed = self.project_service.list_trash()
+            except Exception:
+                logger.exception("Could not load project trash for Mya conversation")
 
         projects = tuple(
             self._project_fact(project, include_path=include_paths)
@@ -145,14 +175,15 @@ class ConversationContextService:
             projects=projects,
             projects_available=registered is not None,
             project_count=len(registered or []),
-            branch=(active_project.branch if active_project and active_project.branch else None)
-            or (session.branch if session else None),
-            commit=(
-                active_project.commit_short
-                if active_project and active_project.commit_short
-                else None
-            )
-            or (session.commit_short if session else None),
+            trashed_projects=tuple(
+                self._project_fact(project, include_path=False)
+                for project in (trashed or [])[: self.max_projects]
+            ),
+            trash_available=trash_requested and trashed is not None,
+            branch=(session.branch if session else None)
+            or (active_project.branch if active_project else None),
+            commit=(session.commit_short if session else None)
+            or (active_project.commit_short if active_project else None),
             working_tree_status=(
                 ("clean" if session.working_tree_clean else "dirty") if session else None
             ),
