@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+from datetime import UTC
 from pathlib import Path
 
 from rich.console import Console
@@ -773,6 +774,99 @@ def cmd_mya(
         console.print(resp)
 
 
+def cmd_setup(
+    name: str | None = None,
+    theme: str | None = None,
+    mya_home: str | None = None,
+    non_interactive: bool = False,
+    force: bool = False,
+) -> None:
+    """Non-interactive or CLI-driven first-run setup (§24)."""
+    import getpass
+    from datetime import datetime
+
+    from myagentos.config.loader import save_config
+    from myagentos.config.paths import DEFAULT_MYA_HOME
+    from myagentos.setup.detector import is_setup_complete
+    from myagentos.setup.initializer import initialize_mya_home
+    from myagentos.setup.models import (
+        MyaHomeConfig,
+        SetupConfig,
+        SetupMeta,
+        UIConfig,
+        UserConfig,
+    )
+    from myagentos.setup.validator import validate_mya_home
+
+    home_path = Path(mya_home).expanduser().resolve() if mya_home else DEFAULT_MYA_HOME.resolve()
+
+    if not force and is_setup_complete(home_path):
+        console.print(
+            f"[yellow]Mya setup is already completed at {home_path}.\n"
+            f"Use --force to re-initialize.[/yellow]"
+        )
+        return
+
+    # Validate destination
+    val_res = validate_mya_home(home_path)
+    if not val_res.valid:
+        console.print(f"[red]Error:[/red] {val_res.error}")
+        sys.exit(1)
+
+    target_home = val_res.resolved_path or home_path
+
+    # Determine user and theme
+    if not name:
+        try:
+            name = getpass.getuser().capitalize()
+        except Exception:
+            name = "Developer"
+
+    resolved_theme = (theme or "default").strip().lower()
+    from myagentos.ui.theme.themes import ThemeRegistry
+
+    reg = ThemeRegistry.get_instance()
+    if resolved_theme not in reg._themes:
+        available = ", ".join(sorted(reg._themes.keys()))
+        console.print(
+            f"[red]Error:[/red] Theme '{resolved_theme}' is invalid. Available: {available}"
+        )
+        sys.exit(1)
+
+    # Initialize Mya Home directory structure
+    try:
+        initialize_mya_home(target_home)
+    except Exception as exc:
+        console.print(f"[red]Error creating Mya Home directories:[/red] {exc}")
+        sys.exit(1)
+
+    # Build and save configuration
+    config = SetupConfig(
+        schema_version=1,
+        setup=SetupMeta(
+            completed=True,
+            completed_at=datetime.now(UTC).isoformat(),
+            version=1,
+        ),
+        user=UserConfig(display_name=name),
+        ui=UIConfig(theme=resolved_theme, motion="full"),
+        mya=MyaHomeConfig(home=str(target_home)),
+    )
+
+    try:
+        save_config(config, mya_home=target_home)
+    except Exception as exc:
+        console.print(f"[red]Error writing configuration:[/red] {exc}")
+        sys.exit(1)
+
+    console.print(
+        f"[bold green]✓ Mya Home initialized successfully.[/bold green]\n"
+        f"  [cyan]Home:[/]    {target_home}\n"
+        f"  [cyan]User:[/]    {name}\n"
+        f"  [cyan]Theme:[/]   {resolved_theme}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="myagentos", description="Agentic OS CLI")
     subparsers = parser.add_subparsers(dest="subcommand", required=False)
@@ -888,6 +982,27 @@ def main() -> None:
     p_mya.add_argument("argument", nargs="?", default="", help="Command argument or prompt")
     p_mya.add_argument("--repo", default=".", help="Repository root path")
 
+    # setup command (§24 First Run Setup)
+    p_setup = subparsers.add_parser("setup", help="Run first-time setup for Mya and Mya Home (§24)")
+    p_setup.add_argument("--name", default=None, help="User display name preference")
+    p_setup.add_argument(
+        "--theme",
+        default=None,
+        choices=["default", "minimal", "high_contrast", "monochrome"],
+        help="Visual UI theme preference",
+    )
+    p_setup.add_argument("--mya-home", default=None, help="Custom directory path for Mya Home")
+    p_setup.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="Run setup non-interactively with defaults or provided arguments",
+    )
+    p_setup.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-setup even if already configured",
+    )
+
     args = parser.parse_args()
 
     if args.subcommand is None:
@@ -938,6 +1053,14 @@ def main() -> None:
             command=args.command,
             argument=args.argument,
             repo_path=args.repo,
+        )
+    elif args.subcommand == "setup":
+        cmd_setup(
+            name=args.name,
+            theme=args.theme,
+            mya_home=args.mya_home,
+            non_interactive=args.non_interactive,
+            force=args.force,
         )
 
 

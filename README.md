@@ -3,7 +3,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Type Checked with Mypy Strict](https://img.shields.io/badge/mypy-strict%20checked-green.svg)](http://mypy-lang.org/)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
-[![Tests: Pytest](https://img.shields.io/badge/tests-273%20passed-brightgreen.svg)](https://docs.pytest.org/)
+[![Tests: Pytest](https://img.shields.io/badge/tests-309%20passed-brightgreen.svg)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
 
 > **Tú hablas con Mya. Los agentes hacen el trabajo. myAgentOS gobierna y garantiza la seguridad.**
@@ -212,6 +212,15 @@ flowchart TD
 - **Sistema de Temas y Modos de Movimiento:** Temas `default`, `minimal`, `high_contrast`, `monochrome`; control de animación `full`, `reduced`, `off`.
 - **Fundación de Personaje Desacoplada:** `MyaPresentationState` y `MyaRenderer` con modos `dot` (`● Mya`), `glyph` (`╭─ Mya ──╮`), `ascii` (avatar compuesto reactivo con expresiones faciales) y `minimal` (`[Mya]`).
 - **Comandos de Presentación:** `/theme`, `/motion`, `/avatar`, `/compact`, `/dense`.
+
+### 18. Mya First Run Onboarding y Mya Home Setup (`src/myagentos/setup/`, `src/myagentos/config/`)
+- **Onboarding de 3 Preguntas:** En el primer arranque sin configuración, Mya lanza un asistente interactivo:
+  1. *¿Cómo quieres que te llame?* (Nombre de preferencia para la interfaz).
+  2. *¿Qué tema quieres utilizar?* (Selector con previsualización en vivo).
+  3. *¿Dónde quieres que Mya esté alojada?* (Mya Home: espacio persistente para memoria, configuración y sesiones).
+- **Independencia de Mya Home:** Desacoplamiento estricto entre el directorio de Mya (`~/.agenticos/` por defecto) y los directorios de proyectos o repositorios de trabajo.
+- **Validación Robusta de Rutas:** Protección contra directorios del sistema operativo (`/System`, `/usr`, `C:\Windows`) y directorios `.git/`, comprobando permisos reales de escritura.
+- **Configuración No Interactiva:** Subcomando `myagentos setup --name <nombre> --theme <tema> --mya-home <ruta> [--force]` para entornos desatendidos o scripts.
 
 ---
 

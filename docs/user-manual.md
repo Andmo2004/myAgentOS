@@ -10,20 +10,21 @@ Este manual explica cómo instalar, configurar y usar MYA en el día a día, des
 
 1. [Instalación](#1-instalación)
 2. [Primera Vez: Configuración de un Modelo de IA](#2-primera-vez-configuración-de-un-modelo-de-ia)
-3. [Iniciar Mya (Interfaz TUI)](#3-iniciar-mya-interfaz-tui)
-4. [Cómo Hablar con Mya](#4-cómo-hablar-con-mya)
-5. [Referencia de Comandos Slash](#5-referencia-de-comandos-slash)
-   - [5.1 Configuración y Modelos](#51-configuración-y-modelos)
-   - [5.2 Observabilidad](#52-observabilidad)
-   - [5.3 Modos de Trabajo y Análisis](#53-modos-de-trabajo-y-análisis)
-   - [5.4 Decisión y Expertise Especializado](#54-decisión-y-expertise-especializado)
-   - [5.5 Proyectos](#55-proyectos)
-   - [5.6 Presentación Visual](#56-presentación-visual)
-   - [5.7 Utilidades de Sesión](#57-utilidades-de-sesión)
-6. [Atajos de Teclado](#6-atajos-de-teclado)
-7. [CLI Avanzada (`myagentos`)](#7-cli-avanzada-myagentos)
-8. [Gestión de Proyectos](#8-gestión-de-proyectos)
-9. [Preguntas Frecuentes](#9-preguntas-frecuentes)
+3. [Primer Arranque y Mya Home (Onboarding Inicial)](#3-primer-arranque-y-mya-home-onboarding-inicial)
+4. [Iniciar Mya (Interfaz TUI)](#4-iniciar-mya-interfaz-tui)
+5. [Cómo Hablar con Mya](#5-cómo-hablar-con-mya)
+6. [Referencia de Comandos Slash](#6-referencia-de-comandos-slash)
+   - [6.1 Configuración y Modelos](#61-configuración-y-modelos)
+   - [6.2 Observabilidad](#62-observabilidad)
+   - [6.3 Modos de Trabajo y Análisis](#63-modos-de-trabajo-y-análisis)
+   - [6.4 Decisión y Expertise Especializado](#64-decisión-y-expertise-especializado)
+   - [6.5 Proyectos](#65-proyectos)
+   - [6.6 Presentación Visual](#66-presentación-visual)
+   - [6.7 Utilidades de Sesión](#67-utilidades-de-sesión)
+7. [Atajos de Teclado](#7-atajos-de-teclado)
+8. [CLI Avanzada (`myagentos`)](#8-cli-avanzada-myagentos)
+9. [Gestión de Proyectos](#9-gestión-de-proyectos)
+10. [Preguntas Frecuentes](#10-preguntas-frecuentes)
 
 ---
 
@@ -128,7 +129,61 @@ Si tienes varias claves configuradas, Mya elige el modelo en este orden:
 
 ---
 
-## 3. Iniciar Mya (Interfaz TUI)
+---
+
+## 3. Primer Arranque y Mya Home (Onboarding Inicial)
+
+La primera vez que ejecutas `mya` (o `myagentos`), el sistema detecta que aún no dispones de configuración persistida y lanza automáticamente un asistente inicial mínimo de **tres preguntas**:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│                         MYA                                  │
+│                                                              │
+│                      Welcome.                                │
+│                                                              │
+│  Antes de empezar necesito configurar tres cosas.            │
+│                                                              │
+│  1 / 3  ¿Cómo quieres que te llame?                          │
+│         > Andrés                                             │
+│                                                              │
+│  2 / 3  ¿Qué tema quieres utilizar en la interfaz?           │
+│         ● Dark (default)   ○ Minimal                         │
+│         ○ High Contrast    ○ Monochrome                      │
+│                                                              │
+│  3 / 3  ¿Dónde quieres que Mya esté alojada?                 │
+│         ~/.agenticos/                                        │
+│         (Espacio propio independiente de tus proyectos)      │
+│                                                              │
+│                   [ Confirmar y empezar ]                    │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Principio Fundamental: Mya Home vs Carpeta del Proyecto
+
+> **El directorio de Mya (`Mya Home`) y los directorios de trabajo de tus proyectos son conceptos estrictamente independientes.**
+
+- **Mya Home (`~/.agenticos/` por defecto):** Es el hogar persistente global de Mya donde almacena sus perfiles, sesiones, memoria de usuario/proyectos, telemetría y cachés.
+- **Carpeta del Proyecto:** El repositorio donde trabajas (ej. `~/projects/mi-app`). Mya puede trabajar con decenas de proyectos distintos sin mover ni alterar su hogar global.
+
+### Configuración No Interactiva (Headless o CI/CD)
+
+Si deseas inicializar Mya Home sin interfaz gráfica interactiva, utiliza el subcomando `setup`:
+
+```bash
+myagentos setup --name "Andrés" --theme dark --mya-home ~/.agenticos
+```
+
+Flags disponibles:
+- `--name <nombre>`: Nombre preferido para la interfaz.
+- `--theme <default|minimal|high_contrast|monochrome>`: Tema inicial.
+- `--mya-home <ruta>`: Ruta personalizada para Mya Home.
+- `--force`: Re-inicializa la configuración si ya existía.
+
+---
+
+## 4. Iniciar Mya (Interfaz TUI)
+
+Una vez completado el primer arranque (o si ya está configurado):
 
 ```bash
 # Forma rápida (con entorno activado)
@@ -138,7 +193,7 @@ mya
 uv run mya
 ```
 
-Verás la pantalla de bienvenida con información de tu repositorio y el modelo activo:
+Verás la pantalla principal con información del repositorio, tu nombre y el modelo activo:
 
 ```text
                  MYA · Agentic OS
@@ -148,15 +203,14 @@ Verás la pantalla de bienvenida con información de tu repositorio y el modelo 
   Commit       a2ce89e
   Status       clean
   Model        claude-3-5-sonnet-latest
+  User         Andrés
 
-  Ready. Describe what you want to build or fix.
+  Hola, Andrés. Ready. Describe what you want to build or fix.
 
   /help  commands    /key  api keys    /model  models    /projects  projects
 ```
 
 El campo de entrada en la parte inferior está listo para escribir. Escribe tu petición en lenguaje natural o usa un comando slash y pulsa **Enter**.
-
----
 
 ## 4. Cómo Hablar con Mya
 

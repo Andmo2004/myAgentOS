@@ -76,10 +76,16 @@ class WelcomePanel(Static):
     """Welcome panel showing repository information (§5)."""
 
     def __init__(
-        self, session: Session, model_id: str = "mock-mya", *args: Any, **kwargs: Any
+        self,
+        session: Session,
+        model_id: str = "mock-mya",
+        user_name: str = "",
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         self.session = session
         self.model_id = model_id
+        self.user_name = user_name
         super().__init__(*args, **kwargs)
 
     def render(self) -> str:
@@ -107,6 +113,9 @@ class WelcomePanel(Static):
             model_line,
         ]
 
+        if self.user_name:
+            lines.append(f"  User         [{Colors.ACCENT}]{self.user_name}[/{Colors.ACCENT}]")
+
         if s.project_profile and s.project_profile.visible_tags:
             tags_str = " ".join(
                 f"[{Colors.PRIMARY}][{t.label}][/{Colors.PRIMARY}]"
@@ -114,10 +123,16 @@ class WelcomePanel(Static):
             )
             lines.append(f"  Profile      {tags_str}")
 
+        ready_text = (
+            f"Hola, {self.user_name}. Ready. Describe what you want to build or fix."
+            if self.user_name
+            else "Ready. Describe what you want to build or fix."
+        )
+
         lines.extend(
             [
                 "",
-                f"  [{Colors.DIM}]Ready. Describe what you want to build or fix.[/{Colors.DIM}]",
+                f"  [{Colors.DIM}]{ready_text}[/{Colors.DIM}]",
                 "",
                 (
                     f"  [{Colors.DIM}]/help[/{Colors.DIM}]  commands    "
@@ -288,6 +303,7 @@ class MyaApp(App[None]):
         repo_path: Path | None = None,
         gateway: ModelGateway | None = None,
         model_id: str | None = None,
+        check_first_run: bool | None = None,
     ) -> None:
         super().__init__()
         self.session = create_session(repo_path)
@@ -309,12 +325,26 @@ class MyaApp(App[None]):
         self.mya_agent = MyaAgent(gateway=self.gateway, model_id=actual_model)
         self._history: list[str] = []
         self._history_index: int = -1
+        self._user_display_name: str = ""
+        from myagentos.config.paths import DEFAULT_MYA_HOME
+
+        self._mya_home: Path = DEFAULT_MYA_HOME
+        if check_first_run is not None:
+            self.check_first_run: bool = check_first_run
+        else:
+            self.check_first_run = (
+                "PYTEST_CURRENT_TEST" not in os.environ
+                and os.environ.get("MYA_SKIP_FIRST_RUN") != "1"
+            )
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         with VerticalScroll(id="conversation", can_focus=False):
             yield WelcomePanel(
-                self.session, model_id=self.mya_agent.model_id, id="welcome"
+                self.session,
+                model_id=self.mya_agent.model_id,
+                user_name=self._user_display_name,
+                id="welcome",
             )
         with Vertical(id="bottom-dock"):
             yield Static(self._render_status_bar(), id="status-bar")
@@ -330,8 +360,66 @@ class MyaApp(App[None]):
             yield Footer()
 
     def on_mount(self) -> None:
-        """Focus the input prompt on startup."""
+        """Focus the input prompt on startup, or launch first-run wizard if needed."""
+        from myagentos.setup.detector import needs_first_run
+
+        if self.check_first_run and needs_first_run():
+            from myagentos.ui.screens.first_run import FirstRunScreen
+
+            self.push_screen(FirstRunScreen(), callback=self._on_first_run_complete)
+        else:
+            self._apply_saved_config()
+            self._update_welcome_panel()
+            self.query_one("#prompt-input", Input).focus()
+
+    def _on_first_run_complete(self, config: Any) -> None:
+        """Callback when first-run wizard completes."""
+        if config is not None:
+            from myagentos.ui.theme.themes import ThemeRegistry
+
+            if getattr(config, "ui", None) and config.ui.theme:
+                try:
+                    ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
+                except Exception:
+                    pass
+            if getattr(config, "user", None) and config.user.display_name:
+                self._user_display_name = config.user.display_name
+            if getattr(config, "mya", None) and config.mya.home:
+                self._mya_home = Path(config.mya.home)
+
+            self._update_welcome_panel()
+            msg = (
+                f"[bold green]✓[/bold green] Bienvenido a Mya, "
+                f"[bold]{self._user_display_name}[/bold]. "
+                f"Entorno listo en [dim]{self._mya_home}[/dim]."
+            )
+            self._append_system_message(msg)
         self.query_one("#prompt-input", Input).focus()
+
+    def _apply_saved_config(self) -> None:
+        """Load and apply persisted config on normal startup."""
+        from myagentos.config.loader import load_config
+        from myagentos.ui.theme.themes import ThemeRegistry
+
+        config = load_config()
+        if config:
+            if config.ui.theme:
+                try:
+                    ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
+                except Exception:
+                    pass
+            if config.user.display_name:
+                self._user_display_name = config.user.display_name
+            if config.mya.home:
+                self._mya_home = Path(config.mya.home)
+
+    def _update_welcome_panel(self) -> None:
+        try:
+            panel = self.query_one("#welcome", WelcomePanel)
+            panel.user_name = self._user_display_name
+            panel.refresh()
+        except Exception:
+            pass
 
     @on(events.Click, "#prompt-container")
     @on(events.Click, "#prompt-label")

@@ -24,6 +24,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 agentic*.md
+new_features/
 
 # Virtual environments
 .venv/
