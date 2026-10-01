@@ -40,3 +40,22 @@ class ProviderAdapter(ABC):
     ) -> LLMResponse:
         """Synchronously calls provider API to generate response."""
         ...
+
+    def validate_credential(self) -> tuple[Any, str | None, Any | None]:
+        """Validates credential using lowest-privilege read-only operation (§6, §26).
+
+        Returns:
+            tuple of (CredentialStatus, error_message or None, IdentityInfo or None)
+        """
+        from myagentos.gateway.credentials import CredentialStatus
+
+        return CredentialStatus.UNKNOWN, None, None
+
+    def discover_models(self) -> list[Any]:
+        """Discovers accessible models in real time with the active credential (§8, §26)."""
+        return []
+
+    def get_identity(self) -> Any | None:
+        """Returns non-secret identity metadata if exposed by the provider (§4.3, §20)."""
+        _, _, identity = self.validate_credential()
+        return identity

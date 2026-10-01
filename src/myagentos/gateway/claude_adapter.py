@@ -13,6 +13,8 @@ from pydantic import BaseModel
 
 from myagentos.core.errors import MyAgentOSError
 from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
+from myagentos.gateway.credentials import CredentialStatus, IdentityInfo
+from myagentos.gateway.discovery import DiscoveredModel
 
 
 class ClaudeAdapter(ProviderAdapter):
@@ -33,6 +35,52 @@ class ClaudeAdapter(ProviderAdapter):
             raise MyAgentOSError("ANTHROPIC_API_KEY is not set. Cannot invoke ClaudeAdapter.")
         self._client = anthropic.Anthropic(api_key=self.api_key)
         return self._client
+
+    def validate_credential(self) -> tuple[CredentialStatus, str | None, IdentityInfo | None]:
+        """Validates Anthropic credential using models.list(limit=1) (§6, §26)."""
+        if not self.api_key:
+            return CredentialStatus.INVALID, "ANTHROPIC_API_KEY no está configurada", None
+        try:
+            client = self._get_client()
+            _ = client.models.list(limit=1, timeout=5.0)
+            # Anthropic API does not reveal org/project metadata on client.
+            # Never infer OS username or local email (§16).
+            return CredentialStatus.VALID, None, None
+        except Exception as e:
+            err_str = str(e).lower()
+            if "401" in err_str or "invalid" in err_str or "unauthorized" in err_str or "authentication" in err_str:
+                return CredentialStatus.INVALID, "La API key no es válida o fue revocada", None
+            if "403" in err_str or "permission" in err_str or "forbidden" in err_str:
+                return CredentialStatus.INSUFFICIENT_SCOPE, "La API key no tiene permisos suficientes", None
+            if "429" in err_str or "rate limit" in err_str:
+                return CredentialStatus.RATE_LIMITED, "Límite de peticiones alcanzado", None
+            return CredentialStatus.PROVIDER_UNAVAILABLE, "Proveedor no disponible o sin conexión", None
+
+    def discover_models(self) -> list[DiscoveredModel]:
+        """Discovers accessible models from Anthropic (§8)."""
+        if not self.api_key:
+            return []
+        try:
+            client = self._get_client()
+            models_page = client.models.list(limit=50, timeout=10.0)
+            items = getattr(models_page, "data", models_page)
+            discovered: list[DiscoveredModel] = []
+            for m in items:
+                raw_caps = ["code_generation", "tool_use", "structured_output"]
+                created_val = m.created_at.isoformat() if hasattr(m, "created_at") and m.created_at else None
+                discovered.append(
+                    DiscoveredModel(
+                        model_id=m.id,
+                        provider="anthropic",
+                        display_name=getattr(m, "display_name", None),
+                        created_at=created_val,
+                        owned_by="anthropic",
+                        raw_capabilities=raw_caps,
+                    )
+                )
+            return discovered
+        except Exception:
+            return []
 
     def generate(
         self,

@@ -143,8 +143,14 @@ class ObservabilityService:
 
         return snapshots
 
-    def render_info(self, session: Session | None = None) -> str:
-        """Renders session status, token distribution and budget summary (§6.1)."""
+    def render_info(
+        self,
+        session: Session | None = None,
+        gateway: Any | None = None,
+        model_id: str | None = None,
+        provider: str | None = None,
+    ) -> str:
+        """Renders session status, credential identity, token distribution and budget summary (§6.1, §16)."""
         job_id = session.current_job_id if session else None
         proj_name = session.repository if session and session.repository else "none"
         mode = session.active_mode if session else "normal"
@@ -156,20 +162,79 @@ class ObservabilityService:
         total_cost = sum(b["cost"] for b in breakdown.values())
         estimated_remaining_cost = max(0.0, (remaining_budget / total_budget) * 0.5)
 
+        model_name = model_id or (getattr(session, "model_id", None) if session else None) or "mock-mya"
+        resolved_provider = provider
+        if not resolved_provider:
+            if model_name.startswith("mock"):
+                resolved_provider = "mock"
+            elif "gpt" in model_name or "o1" in model_name or "o3" in model_name:
+                resolved_provider = "openai"
+            elif "claude" in model_name or "anthropic" in model_name:
+                resolved_provider = "anthropic"
+            elif "gemini" in model_name or "google" in model_name:
+                resolved_provider = "google"
+            else:
+                resolved_provider = "mock"
+
+        deployment_type = "LOCAL" if resolved_provider == "mock" else "REMOTE"
+
         lines = [
             format_command_badge("/info") + " [bold]SESSION INFORMATION[/bold]",
             "",
-            "[bold cyan]── SESSION ───────────────────────────────────────────────────[/bold cyan]",
-            f"  Project: [bold]{proj_name}[/bold]",
-            "  Mya:     ready",
-            f"  Job:     {job_id or 'none'}",
-            f"  Mode:    {mode}",
-            "",
-            "[bold cyan]── TOKENS ────────────────────────────────────────────────────[/bold cyan]",
-            f"  Budget remaining: [bold green]{remaining_budget:,}[/bold green]",
-            f"  Used:             [bold]{total_used:,}[/bold] / {total_budget:,}",
+            "[bold cyan]── MYA & MODEL ───────────────────────────────────────────────[/bold cyan]",
+            f"  Model:       [bold cyan]{model_name}[/bold cyan]",
+            f"  Deployment:  [bold]{deployment_type}[/bold]",
+            f"  Provider:    [bold]{resolved_provider.capitalize()}[/bold]",
             "",
         ]
+
+        if gateway is not None:
+            profile = gateway.get_credential_profile(resolved_provider)
+            if profile:
+                is_valid = str(profile.status).lower() in ("valid", "credentialstatus.valid")
+                status_icon = "✓" if is_valid else "✗"
+                status_style = "bold green" if is_valid else "bold red"
+                status_name = profile.status.name if hasattr(profile.status, "name") else str(profile.status).upper()
+                lines.extend(
+                    [
+                        "[bold cyan]── CREDENTIAL ────────────────────────────────────────────────[/bold cyan]",
+                        f"  Status:      [{status_style}]{status_icon} {status_name}[/{status_style}]",
+                        f"  Source:      {profile.source}",
+                        f"  Profile:     {profile.credential_id}",
+                        f"  Fingerprint: [dim]{profile.fingerprint}[/dim]",
+                    ]
+                )
+                if profile.identity:
+                    if profile.identity.organization:
+                        lines.append(f"  Account:     {profile.identity.organization}")
+                    if profile.identity.project:
+                        lines.append(f"  Project:     {profile.identity.project}")
+                    if profile.identity.quota_scope:
+                        lines.append(f"  Quota Scope: {profile.identity.quota_scope}")
+                    if not (
+                        profile.identity.organization
+                        or profile.identity.project
+                        or profile.identity.quota_scope
+                    ):
+                        lines.append("  Identity:    Not provided by provider")
+                else:
+                    lines.append("  Identity:    Not provided by provider")
+                lines.append("")
+
+        lines.extend(
+            [
+                "[bold cyan]── SESSION ───────────────────────────────────────────────────[/bold cyan]",
+                f"  Project: [bold]{proj_name}[/bold]",
+                "  Mya:     ready",
+                f"  Job:     {job_id or 'none'}",
+                f"  Mode:    {mode}",
+                "",
+                "[bold cyan]── TOKENS ────────────────────────────────────────────────────[/bold cyan]",
+                f"  Budget remaining: [bold green]{remaining_budget:,}[/bold green]",
+                f"  Used:             [bold]{total_used:,}[/bold] / {total_budget:,}",
+                "",
+            ]
+        )
 
         for role in ["Planner", "Worker", "Reviewer", "Mya", "Router"]:
             used = breakdown[role]["input"] + breakdown[role]["output"]

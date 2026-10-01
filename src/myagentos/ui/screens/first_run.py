@@ -208,10 +208,10 @@ class FirstRunScreen(Screen[SetupConfig | None]):
         s3 = self.query_one("#step_3_container", Vertical)
         sr = self.query_one("#step_review_container", Vertical)
 
-        s1.display = (step == 1)
-        s2.display = (step == 2)
-        s3.display = (step == 3)
-        sr.display = (step == 4)
+        s1.display = step == 1
+        s2.display = step == 2
+        s3.display = step == 3
+        sr.display = step == 4
 
         if step == 1:
             self.query_one("#input_display_name", Input).focus()

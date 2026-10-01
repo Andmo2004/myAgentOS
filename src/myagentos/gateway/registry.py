@@ -37,3 +37,18 @@ class ModelRegistry:
             if all(cap in entry.capabilities for cap in required_capabilities):
                 results.append(entry)
         return results
+
+    def get_entries_for_provider(self, provider: str) -> list[ModelEntry]:
+        """Returns all registered models for a given provider (normalizing aliases)."""
+        p = provider.lower().strip()
+        if p == "gemini":
+            p = "google"
+        results: list[ModelEntry] = []
+        for entry in self._entries.values():
+            entry_p = entry.provider.lower().strip()
+            if entry_p == "gemini":
+                entry_p = "google"
+            if entry_p == p:
+                results.append(entry)
+        return results
+

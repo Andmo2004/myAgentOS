@@ -165,3 +165,156 @@ def get_completions(prefix: str) -> list[str]:
     if not prefix.startswith("/"):
         return []
     return [cmd for cmd in AVAILABLE_COMMANDS if cmd.startswith(prefix.lower())]
+
+
+class CommandInfo(BaseModel):
+    """Human-facing metadata for a slash command (help + autocomplete)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    description: str
+    category: str
+    args: str = ""
+    cost: str = ""  # "low" | "medium" | "high" | "max" | ""
+
+    @property
+    def takes_argument(self) -> bool:
+        return bool(self.args)
+
+
+COMMAND_CATALOG: list[CommandInfo] = [
+    CommandInfo(name="/help", description="Ver todos los comandos", category="General"),
+    CommandInfo(name="/clear", description="Limpiar la conversación", category="General"),
+    CommandInfo(name="/status", description="Estado de git y del proyecto", category="General"),
+    CommandInfo(name="/projects", description="Abrir explorador de proyectos", category="General"),
+    CommandInfo(
+        name="/categorize", description="Analizar el perfil del proyecto", category="General"
+    ),
+    CommandInfo(
+        name="/mya", args="<prompt>", description="Hablar directamente con Mya", category="General"
+    ),
+    CommandInfo(name="/exit", description="Salir de Mya", category="General"),
+    CommandInfo(
+        name="/info",
+        description="Sesión y presupuesto de tokens",
+        category="Observabilidad",
+        cost="low",
+    ),
+    CommandInfo(
+        name="/telemetry",
+        description="Actividad de agentes y uso",
+        category="Observabilidad",
+        cost="low",
+    ),
+    CommandInfo(
+        name="/monitor",
+        description="Estado en vivo de agentes y archivos",
+        category="Observabilidad",
+        cost="low",
+    ),
+    CommandInfo(
+        name="/fast",
+        args="<prompt>",
+        description="Ruta rápida, bajo coste",
+        category="Modos de trabajo",
+        cost="low",
+    ),
+    CommandInfo(
+        name="/sci_mode",
+        args="<prompt>",
+        description="Análisis científico",
+        category="Modos de trabajo",
+        cost="medium",
+    ),
+    CommandInfo(
+        name="/deep_research",
+        args="<consulta>",
+        description="Investigación exhaustiva (sin cambios de código)",
+        category="Modos de trabajo",
+        cost="max",
+    ),
+    CommandInfo(
+        name="/optimize",
+        args="<objetivo>",
+        description="Revisión de rendimiento (sin cambios automáticos)",
+        category="Modos de trabajo",
+        cost="medium",
+    ),
+    CommandInfo(
+        name="/decision",
+        args="<pregunta>",
+        description="5 perspectivas independientes",
+        category="Decisión y expertise",
+        cost="high",
+    ),
+    CommandInfo(
+        name="/cloud",
+        args="<prompt>",
+        description="Arquitectura cloud e IAM",
+        category="Decisión y expertise",
+        cost="medium",
+    ),
+    CommandInfo(
+        name="/security",
+        args="<prompt>",
+        description="Auditoría de seguridad y OWASP",
+        category="Decisión y expertise",
+        cost="medium",
+    ),
+    CommandInfo(
+        name="/theme",
+        args="[nombre]",
+        description="Tema: default, minimal, high_contrast, monochrome",
+        category="Apariencia",
+    ),
+    CommandInfo(
+        name="/motion",
+        args="[modo]",
+        description="Animación: full, reduced, off",
+        category="Apariencia",
+    ),
+    CommandInfo(
+        name="/avatar",
+        args="[modo]",
+        description="Avatar: dot, glyph, ascii, minimal",
+        category="Apariencia",
+    ),
+    CommandInfo(name="/compact", description="Vista compacta", category="Apariencia"),
+    CommandInfo(name="/dense", description="Vista cómoda (espaciada)", category="Apariencia"),
+    CommandInfo(
+        name="/key",
+        args="[proveedor] [clave]",
+        description="Conectar un modelo (claude, openai, gemini)",
+        category="Configuración",
+        cost="low",
+    ),
+    CommandInfo(
+        name="/model",
+        args="[nombre]",
+        description="Cambiar el modelo activo",
+        category="Configuración",
+        cost="low",
+    ),
+]
+
+_CATALOG_BY_NAME: dict[str, CommandInfo] = {c.name: c for c in COMMAND_CATALOG}
+
+
+def get_command_info(name: str) -> CommandInfo | None:
+    """Look up catalog metadata for a slash command."""
+    return _CATALOG_BY_NAME.get(name.lower())
+
+
+def search_commands(prefix: str) -> list[CommandInfo]:
+    """Return catalog entries matching a typed prefix (prefix first, then substring)."""
+    if not prefix.startswith("/"):
+        return []
+    query = prefix.lower()
+    starts = [c for c in COMMAND_CATALOG if c.name.startswith(query)]
+    contains = [
+        c
+        for c in COMMAND_CATALOG
+        if c not in starts and (query[1:] in c.name or query[1:] in c.description.lower())
+    ]
+    return starts + contains if len(query) > 1 else list(COMMAND_CATALOG)

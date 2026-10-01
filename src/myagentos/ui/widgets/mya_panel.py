@@ -37,9 +37,7 @@ class MyaPanelWidget(Static):
         expression: str = "calm",
     ) -> None:
         self.message = message
-        self.state = self.state.model_copy(
-            update={"status": status, "expression": expression}
-        )
+        self.state = self.state.model_copy(update={"status": status, "expression": expression})
         self.refresh()
 
     def render(self) -> str:
@@ -47,6 +45,4 @@ class MyaPanelWidget(Static):
         renderer = get_mya_renderer(self.state.avatar_mode)
         if not self.message:
             return renderer.render_presence(self.state, ascii_only=theme.ascii_only)
-        return renderer.render_speech_bubble(
-            self.message, self.state, ascii_only=theme.ascii_only
-        )
+        return renderer.render_speech_bubble(self.message, self.state, ascii_only=theme.ascii_only)

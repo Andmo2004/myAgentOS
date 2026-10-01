@@ -237,9 +237,7 @@ class VisualStateMapper:
                 passed = ev.payload.get("passed", True)
                 overall = VisualStatus.SUCCESS if passed else VisualStatus.FAILED
                 for k in checks:
-                    checks[k] = checks[k].model_copy(
-                        update={"status": overall}
-                    )
+                    checks[k] = checks[k].model_copy(update={"status": overall})
             elif ev.event_name == EventName.TEST_FAILED:
                 overall = VisualStatus.FAILED
                 checks["test_suite"] = checks["test_suite"].model_copy(

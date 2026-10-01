@@ -7,15 +7,23 @@ The UI contains no security logic and sends commands to the Job Controller.
 
 from __future__ import annotations
 
+import asyncio
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
+from rich.console import Group, RenderableType
+from rich.markdown import Markdown
+from rich.table import Table
+from rich.text import Text
 from textual import events, on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Footer, Header, Input, Static
+from textual.reactive import reactive
+from textual.widgets import Footer, Input, OptionList, Static
+from textual.worker import Worker
 
 from myagentos.gateway.client import ModelGateway
 from myagentos.mya.agent import MyaAgent
@@ -26,124 +34,78 @@ from myagentos.mya.commands import (
 )
 from myagentos.mya.presentation import MyaRenderState, get_mya_renderer
 from myagentos.ui.commands import (
+    COMMAND_CATALOG,
     ParsedCommand,
     SlashCommandKind,
+    get_command_info,
     parse_input,
 )
 from myagentos.ui.screens.projects import ProjectsScreen
-from myagentos.ui.session import Session, create_session
+from myagentos.ui.session import create_session
+from myagentos.ui.theme.mya_theme import (
+    MUTED,
+    MYA_RICH_THEME,
+    PROVIDERS,
+    SAND,
+    SAGE,
+    StatusLine,
+    Thinking,
+    Welcome,
+    register_all_themes,
+    resolve_provider,
+)
+from myagentos.ui.theme.textual_themes import MYA_TEXTUAL_THEMES, PRESENTATION_TO_TEXTUAL
 from myagentos.ui.theme.themes import ThemeRegistry
-from myagentos.ui.themes import Colors, Icons
+from myagentos.ui.themes import COST_COLORS, Colors, Icons
 from myagentos.ui.visual.motion import MotionController
+from myagentos.ui.widgets.chat import (
+    ChatMessage,
+    CommandSuggestions,
+    MessageRole,
+    PromptInput,
+    ThinkingIndicator,
+    WelcomePanel,
+)
 
-HELP_TEXT = """\
-[bold cyan]Talk naturally:[/bold cyan]
-  "añade autenticación"
-  "arregla los tests"
-  "muéstrame mis proyectos"
+T = TypeVar("T")
 
-[bold cyan]Observability:[/bold cyan]
-  /info         session & token budget 🟢
-  /telemetry    agent activity & usage 🟢
-  /monitor      live agent & file status 🟢
-  /status       git & project status
-  /projects     project explorer (Ctrl+P)
-
-[bold cyan]Working Modes & Research:[/bold cyan]
-  /fast <prompt>         fast path, low overhead 🟢
-  /sci_mode <prompt>     scientific analysis 🟡
-  /deep_research <query> exhaustive research (no code change) 🔴
-  /optimize <target>     performance review (no auto change) 🟡
-
-[bold cyan]Decision & Expertise:[/bold cyan]
-  /decision <question>   5 independent perspectives 🟠
-  /cloud <prompt>        cloud architecture & IAM 🟡
-  /security <prompt>     cybersecurity & OWASP audit 🟡
-
-[bold cyan]Visual & Character (Presentation):[/bold cyan]
-  /theme [name]          switch theme (default, minimal, high_contrast, monochrome)
-  /motion [mode]         animation mode (full, reduced, off)
-  /avatar [mode]         mya avatar style (dot, glyph, ascii, minimal)
-  /compact, /dense       toggle display density
-
-[bold cyan]Config & Models:[/bold cyan]
-  /key [provider] [key]  configura claves API (claude, openai, gemini) en .env 🟢
-  /model [name]          cambia modelo activo (claude-3-5-sonnet, gpt-4o, gemini) 🟢
-"""
+PROMPT_HINTS = "Enter enviar · / comandos · Tab completar · ↑↓ historial"
 
 
-class WelcomePanel(Static):
-    """Welcome panel showing repository information (§5)."""
+def build_help() -> RenderableType:
+    """Render the command reference as a grouped, aligned table."""
+    intro = Text.from_markup("Describe lo que quieres construir — o usa uno de estos comandos:\n")
+    table = Table.grid(padding=(0, 2))
+    table.add_column(no_wrap=True)
+    table.add_column(no_wrap=True, style=Colors.MUTED)
+    table.add_column()
+    table.add_column(no_wrap=True)
 
-    def __init__(
-        self,
-        session: Session,
-        model_id: str = "mock-mya",
-        user_name: str = "",
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:
-        self.session = session
-        self.model_id = model_id
-        self.user_name = user_name
-        super().__init__(*args, **kwargs)
-
-    def render(self) -> str:
-        s = self.session
-        status = (
-            f"[{Colors.SUCCESS}]clean[/{Colors.SUCCESS}]"
-            if s.working_tree_clean
-            else f"[{Colors.WARNING}]dirty[/{Colors.WARNING}]"
+    current_category = ""
+    for info in COMMAND_CATALOG:
+        if info.category != current_category:
+            if current_category:
+                table.add_row("", "", "", "")
+            table.add_row(Text(info.category.upper(), style=f"bold {Colors.ACCENT}"), "", "", "")
+            current_category = info.category
+        cost = Text("●", style=COST_COLORS[info.cost]) if info.cost else Text("")
+        table.add_row(
+            Text(info.name, style=f"bold {Colors.PRIMARY}"), info.args, info.description, cost
         )
 
-        repo_line = f"  Repository   [bold]{s.repository or 'no repository'}[/bold]"
-        branch_line = f"  Branch       [{Colors.PRIMARY}]{s.branch or 'N/A'}[/{Colors.PRIMARY}]"
-        commit_line = f"  Commit       [{Colors.DIM}]{s.commit_short or 'N/A'}[/{Colors.DIM}]"
-        status_line = f"  Status       {status}"
-        model_line = f"  Model        [{Colors.DIM}]{self.model_id}[/{Colors.DIM}]"
-
-        lines = [
-            "",
-            f"[bold {Colors.PRIMARY}]                     MYA · Agentic OS[/bold {Colors.PRIMARY}]",
-            "",
-            repo_line,
-            branch_line,
-            commit_line,
-            status_line,
-            model_line,
-        ]
-
-        if self.user_name:
-            lines.append(f"  User         [{Colors.ACCENT}]{self.user_name}[/{Colors.ACCENT}]")
-
-        if s.project_profile and s.project_profile.visible_tags:
-            tags_str = " ".join(
-                f"[{Colors.PRIMARY}][{t.label}][/{Colors.PRIMARY}]"
-                for t in s.project_profile.visible_tags
-            )
-            lines.append(f"  Profile      {tags_str}")
-
-        ready_text = (
-            f"Hola, {self.user_name}. Ready. Describe what you want to build or fix."
-            if self.user_name
-            else "Ready. Describe what you want to build or fix."
-        )
-
-        lines.extend(
-            [
-                "",
-                f"  [{Colors.DIM}]{ready_text}[/{Colors.DIM}]",
-                "",
-                (
-                    f"  [{Colors.DIM}]/help[/{Colors.DIM}]  commands    "
-                    f"[{Colors.DIM}]/key[/{Colors.DIM}]  api keys    "
-                    f"[{Colors.DIM}]/model[/{Colors.DIM}]  models    "
-                    f"[{Colors.DIM}]/projects[/{Colors.DIM}]  projects"
-                ),
-                "",
-            ]
-        )
-        return "\n".join(lines)
+    legend = Text.assemble(
+        "\nCoste:  ",
+        ("●", COST_COLORS["low"]),
+        " bajo   ",
+        ("●", COST_COLORS["medium"]),
+        " medio   ",
+        ("●", COST_COLORS["high"]),
+        " alto   ",
+        ("●", COST_COLORS["max"]),
+        " máximo",
+        style=Colors.MUTED,
+    )
+    return Group(intro, table, legend)
 
 
 class MyaApp(App[None]):
@@ -154,73 +116,17 @@ class MyaApp(App[None]):
     """
 
     TITLE = "Mya · Agentic OS"
-
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-
-    #welcome {
-        height: auto;
-        border: round $primary;
-        margin: 1 2;
-        padding: 0 1;
-    }
-
-    #conversation {
-        height: 1fr;
-        margin: 0 1;
-        padding: 0 1;
-        scrollbar-size: 1 1;
-    }
-
-    #bottom-dock {
-        dock: bottom;
-        height: auto;
-    }
-
-    #status-bar {
-        height: 1;
-        background: $surface;
-        color: $text-muted;
-        padding: 0 2;
-    }
-
-    #prompt-container {
-        height: 3;
-        padding: 0 1;
-    }
-
-    #prompt-label {
-        width: auto;
-        height: 3;
-        content-align: center middle;
-        padding-right: 1;
-    }
-
-    #prompt-input {
-        width: 1fr;
-    }
-
-    .mya-message {
-        margin: 0 0 1 0;
-    }
-
-    .user-message {
-        margin: 0 0 1 0;
-        color: $text;
-    }
-
-    .system-message {
-        margin: 0 0 1 0;
-        color: $text-muted;
-    }
-    """
+    COMMAND_PALETTE_BINDING = "ctrl+k"
+    CSS_PATH = "mya.tcss"
+    provider = reactive("mya")
 
     BINDINGS = [
-        Binding("ctrl+c", "cancel", "Cancel", show=False),
-        Binding("ctrl+d", "quit", "Exit", show=False),
-        Binding("ctrl+p", "open_projects", "Projects", show=True),
+        Binding("ctrl+c", "cancel", "Cancelar", show=False, priority=True),
+        Binding("ctrl+d", "quit", "Salir", show=True, priority=True),
+        Binding("ctrl+p", "open_projects", "Proyectos", show=True),
+        Binding("ctrl+l", "clear_conversation", "Limpiar", show=True),
+        Binding("f1", "show_commands", "Comandos", show=True),
+        Binding("f2", "next_model", "Modelo", show=True),
         Binding("escape", "escape", "Escape", show=False),
     ]
 
@@ -325,10 +231,24 @@ class MyaApp(App[None]):
         self.mya_agent = MyaAgent(gateway=self.gateway, model_id=actual_model)
         self._history: list[str] = []
         self._history_index: int = -1
+        self._history_draft: str = ""
+        self._suppress_suggestions: bool = False
+        self._active_worker: Worker[None] | None = None
         self._user_display_name: str = ""
+        from myagentos.config.loader import load_config
         from myagentos.config.paths import DEFAULT_MYA_HOME
 
         self._mya_home: Path = DEFAULT_MYA_HOME
+        saved_cfg = load_config()
+        if saved_cfg and saved_cfg.user and saved_cfg.user.display_name:
+            self._user_display_name = saved_cfg.user.display_name
+        else:
+            import getpass
+
+            try:
+                self._user_display_name = getpass.getuser().capitalize()
+            except Exception:
+                self._user_display_name = "Andmo"
         if check_first_run is not None:
             self.check_first_run: bool = check_first_run
         else:
@@ -337,30 +257,100 @@ class MyaApp(App[None]):
                 and os.environ.get("MYA_SKIP_FIRST_RUN") != "1"
             )
 
+        register_all_themes(self)
+        for textual_theme in MYA_TEXTUAL_THEMES:
+            try:
+                self.register_theme(textual_theme)
+            except Exception:
+                pass
+        self.console.push_theme(MYA_RICH_THEME)
+
+        self.model_id = actual_model
+        self.provider = resolve_provider(actual_model)
+        self.theme = f"mya-{self.provider}"
+
+    def set_model(
+        self,
+        model_id: str,
+        provider: str | None = None,
+        notify_chat: bool = False,
+    ) -> None:
+        """Punto de entrada único para cambiar de modelo (arranque, /model, paleta)."""
+        self.model_id = model_id
+        if hasattr(self, "mya_agent"):
+            self.mya_agent.model_id = model_id
+        self.provider = resolve_provider(model_id, provider)
+        self.theme = f"mya-{self.provider}"
+
+        try:
+            status_bar = self.query_one("#status-bar", StatusLine)
+            status_bar.set(
+                project=getattr(self.session, "repository", None),
+                branch=getattr(self.session, "branch", None),
+                model=self.model_id,
+                job=getattr(self.session, "current_job_id", None),
+                dirty=not getattr(self.session, "working_tree_clean", True),
+            )
+        except Exception:
+            pass
+
+        try:
+            welcome = self.query_one("#welcome", Welcome)
+            welcome.model_id = model_id
+        except Exception:
+            pass
+
+        if notify_chat and self.is_mounted:
+            s = PROVIDERS.get(self.provider, PROVIDERS["mya"])
+            conv = self.query_one("#conversation", VerticalScroll)
+            conv.mount(
+                ChatMessage(
+                    Text.assemble(
+                        (f"{s.glyph} ", f"bold {s.primary}"),
+                        ("modelo ", MUTED),
+                        self.model_id,
+                    ),
+                    role="tool",
+                )
+            )
+            self.call_after_refresh(conv.scroll_end, animate=False)
+
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
         with VerticalScroll(id="conversation", can_focus=False):
-            yield WelcomePanel(
+            yield Welcome(
                 self.session,
-                model_id=self.mya_agent.model_id,
+                model_id=self.model_id,
                 user_name=self._user_display_name,
                 id="welcome",
             )
         with Vertical(id="bottom-dock"):
-            yield Static(self._render_status_bar(), id="status-bar")
+            yield CommandSuggestions(id="suggestions")
             with Horizontal(id="prompt-container"):
                 yield Static(
-                    f"[bold {Colors.PRIMARY}]{Icons.PROMPT}[/bold {Colors.PRIMARY}]",
+                    Icons.PROMPT,
                     id="prompt-label",
                 )
-                yield Input(
-                    placeholder="Describe what you need...",
+                yield PromptInput(
+                    placeholder="describe qué quieres construir…",
                     id="prompt-input",
                 )
-            yield Footer()
+            yield StatusLine(id="status-bar")
 
     def on_mount(self) -> None:
-        """Focus the input prompt on startup, or launch first-run wizard if needed."""
+        """Aplica el tema por proveedor, inicializa la barra de estado y enfoca el prompt."""
+        self.theme = f"mya-{self.provider}"
+        try:
+            status_bar = self.query_one("#status-bar", StatusLine)
+            status_bar.set(
+                project=getattr(self.session, "repository", None),
+                branch=getattr(self.session, "branch", None),
+                model=self.model_id,
+                job=getattr(self.session, "current_job_id", None),
+                dirty=not getattr(self.session, "working_tree_clean", True),
+            )
+        except Exception:
+            pass
+
         from myagentos.setup.detector import needs_first_run
 
         if self.check_first_run and needs_first_run():
@@ -370,100 +360,232 @@ class MyaApp(App[None]):
         else:
             self._apply_saved_config()
             self._update_welcome_panel()
-            self.query_one("#prompt-input", Input).focus()
+            self._prompt.focus()
 
     def _on_first_run_complete(self, config: Any) -> None:
         """Callback when first-run wizard completes."""
         if config is not None:
-            from myagentos.ui.theme.themes import ThemeRegistry
-
-            if getattr(config, "ui", None) and config.ui.theme:
-                try:
-                    ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
-                except Exception:
-                    pass
             if getattr(config, "user", None) and config.user.display_name:
                 self._user_display_name = config.user.display_name
             if getattr(config, "mya", None) and config.mya.home:
                 self._mya_home = Path(config.mya.home)
+            if getattr(config, "model", None) and config.model.default:
+                self.set_model(config.model.default)
+            if getattr(config, "ui", None) and config.ui.theme:
+                try:
+                    ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
+                    if config.ui.theme != "default":
+                        self.theme = PRESENTATION_TO_TEXTUAL.get(config.ui.theme, f"mya-{self.provider}")
+                except Exception:
+                    pass
 
             self._update_welcome_panel()
+            self._refresh_ui_model()
             msg = (
                 f"[bold green]✓[/bold green] Bienvenido a Mya, "
                 f"[bold]{self._user_display_name}[/bold]. "
                 f"Entorno listo en [dim]{self._mya_home}[/dim]."
             )
             self._append_system_message(msg)
-        self.query_one("#prompt-input", Input).focus()
+        self._prompt.focus()
 
     def _apply_saved_config(self) -> None:
         """Load and apply persisted config on normal startup."""
         from myagentos.config.loader import load_config
-        from myagentos.ui.theme.themes import ThemeRegistry
 
         config = load_config()
         if config:
-            if config.ui.theme:
-                try:
-                    ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
-                except Exception:
-                    pass
             if config.user.display_name:
                 self._user_display_name = config.user.display_name
             if config.mya.home:
                 self._mya_home = Path(config.mya.home)
+            if getattr(config, "model", None) and config.model.default:
+                self.set_model(config.model.default)
+            if getattr(config, "ui", None) and config.ui.theme and config.ui.theme != "default":
+                try:
+                    ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
+                    self.theme = PRESENTATION_TO_TEXTUAL.get(config.ui.theme, f"mya-{self.provider}")
+                except Exception:
+                    pass
 
     def _update_welcome_panel(self) -> None:
         try:
-            panel = self.query_one("#welcome", WelcomePanel)
+            panel = self.query_one("#welcome", Welcome)
             panel.user_name = self._user_display_name
-            panel.refresh()
+            panel.model_id = self.model_id
+            panel.refresh_info()
         except Exception:
             pass
+
+    # ── Prompt helpers ──────────────────────────────────────────────
+
+    @property
+    def _prompt(self) -> PromptInput:
+        return self.query_one("#prompt-input", PromptInput)
+
+    @property
+    def _suggestions(self) -> CommandSuggestions:
+        return self.query_one("#suggestions", CommandSuggestions)
+
+    @property
+    def _busy(self) -> bool:
+        return self._active_worker is not None and self._active_worker.is_running
+
+    def _fill_prompt(self, text: str, show_suggestions: bool = False) -> None:
+        self._suppress_suggestions = not show_suggestions
+        self._suggestions.display = False
+        prompt = self._prompt
+        prompt.value = text
+        prompt.cursor_position = len(text)
+        prompt.focus()
 
     @on(events.Click, "#prompt-container")
     @on(events.Click, "#prompt-label")
     @on(events.Click, "#status-bar")
     def _on_bottom_bar_click(self) -> None:
-        """Ensure input prompt gets focused when clicking prompt bar, icon, or status bar."""
-        self.query_one("#prompt-input", Input).focus()
+        self._prompt.focus()
+
+    @on(Input.Changed, "#prompt-input")
+    def _on_prompt_changed(self, event: Input.Changed) -> None:
+        if self._suppress_suggestions:
+            self._suppress_suggestions = False
+            self._suggestions.display = False
+            return
+        self._suggestions.show_for(event.value)
+
+    @on(PromptInput.Navigate)
+    def _on_prompt_navigate(self, event: PromptInput.Navigate) -> None:
+        if self._suggestions.display:
+            self._suggestions.move(event.delta)
+        else:
+            self._navigate_history(event.delta)
+
+    @on(PromptInput.Complete)
+    def _on_prompt_complete(self) -> None:
+        command = self._suggestions.selected_command
+        if command:
+            info = get_command_info(command)
+            self._fill_prompt(f"{command} " if info and info.takes_argument else command)
+
+    @on(OptionList.OptionSelected, "#suggestions")
+    def _on_suggestion_clicked(self, event: OptionList.OptionSelected) -> None:
+        if event.option.id:
+            self._accept_suggestion(event.option.id)
+
+    @on(WelcomePanel.ActionRequested)
+    def _on_welcome_action(self, event: WelcomePanel.ActionRequested) -> None:
+        if event.submit:
+            self._submit_text(event.text)
+        else:
+            self._fill_prompt(event.text)
+
+    def _accept_suggestion(self, command: str) -> None:
+        info = get_command_info(command)
+        if info and info.args.startswith("<"):
+            self._fill_prompt(f"{command} ")
+        else:
+            self._submit_text(command)
+
+    def _navigate_history(self, delta: int) -> None:
+        if not self._history:
+            return
+        if self._history_index == -1:
+            if delta > 0:
+                return
+            self._history_draft = self._prompt.value
+            self._history_index = len(self._history) - 1
+        else:
+            self._history_index += delta
+            if self._history_index >= len(self._history):
+                self._history_index = -1
+                self._fill_prompt(self._history_draft)
+                return
+            self._history_index = max(0, self._history_index)
+        self._fill_prompt(self._history[self._history_index])
+
+    # ── Submission & Worker Execution ──────────────────────────────
 
     @on(Input.Submitted, "#prompt-input")
-    async def on_submit(self, event: Input.Submitted) -> None:
-        """Handle user input submission."""
+    def on_submit(self, event: Input.Submitted) -> None:
         raw = event.value.strip()
+        if self._suggestions.display:
+            command = self._suggestions.selected_command
+            if command and raw.lower() != command:
+                self._accept_suggestion(command)
+                return
+        self._submit_text(raw)
+
+    def _submit_text(self, raw: str) -> None:
+        raw = raw.strip()
         if not raw:
             return
+        if self._busy:
+            self.notify("Mya todavía está respondiendo. Ctrl+C para cancelar.", severity="warning")
+            return
 
-        # Clear input
-        inp = self.query_one("#prompt-input", Input)
-        inp.value = ""
-
-        # Add to history
-        self._history.append(raw)
-        self._history_index = -1
-
-        # Display user message
-        self._append_user_message(raw)
-
-        # Parse and handle
+        self._fill_prompt("")
         cmd = parse_input(raw)
-        await self._handle_command(cmd)
+        display_text = self._redact_secrets(cmd, raw)
+
+        if not self._history or self._history[-1] != display_text:
+            self._history.append(display_text)
+        self._history_index = -1
+        self._history_draft = ""
+
+        self._append_user_message(display_text)
+        self._active_worker = self.run_worker(
+            self._run_command(cmd), group="mya", exclusive=True, exit_on_error=False
+        )
+
+    @staticmethod
+    def _redact_secrets(cmd: ParsedCommand, raw: str) -> str:
+        """Mask API keys in history and transcript."""
+        if cmd.kind in (SlashCommandKind.KEY, SlashCommandKind.SETTINGS):
+            parts = cmd.argument.split(maxsplit=1)
+            if len(parts) == 2:
+                return f"{raw.split(maxsplit=1)[0]} {parts[0]} ••••••••"
+        return raw
+
+    async def _run_command(self, cmd: ParsedCommand) -> None:
+        container = self.query_one("#prompt-container")
+        container.add_class("-busy")
+        try:
+            await self._handle_command(cmd)
+        except asyncio.CancelledError:
+            self._append_system_message("Operación cancelada.")
+            raise
+        except Exception as err:
+            self._append_error_message(f"{type(err).__name__}: {err}")
+        finally:
+            container.remove_class("-busy")
+
+    async def _think(self, fn: Callable[..., T], *args: Any, label: str | None = None) -> T:
+        """Run a blocking call off the UI thread while showing an animated indicator."""
+        conv = self.query_one("#conversation", VerticalScroll)
+        theme = ThemeRegistry.get_instance().active_theme
+        indicator = Thinking(
+            label=label,
+            animate=MotionController.get_instance().allows_continuous_animation,
+            ascii_only=theme.ascii_only,
+        )
+        await conv.mount(indicator)
+        conv.scroll_end(animate=False)
+        try:
+            return await asyncio.to_thread(fn, *args)
+        finally:
+            await indicator.remove()
 
     async def _handle_command(self, cmd: ParsedCommand) -> None:
-        """Route parsed commands to handlers."""
+        """Route parsed commands to appropriate handlers."""
         match cmd.kind:
             case SlashCommandKind.EXIT:
                 self.exit()
 
             case SlashCommandKind.HELP:
-                self._append_mya_message(HELP_TEXT)
+                self._append_mya_message(build_help())
 
             case SlashCommandKind.CLEAR:
-                conv = self.query_one("#conversation", VerticalScroll)
-                for child in list(conv.children):
-                    if child.id != "welcome":
-                        await child.remove()
+                await self._clear_conversation()
 
             case SlashCommandKind.STATUS:
                 self._show_status()
@@ -472,24 +594,29 @@ class MyaApp(App[None]):
                 from myagentos.categorization import ProjectCategorizationService
 
                 service = ProjectCategorizationService()
-                profile = service.scan_project(self.session.repo_root)
+                profile = await self._think(
+                    service.scan_project, self.session.repo_root, label="Analizando el proyecto"
+                )
                 self.session.project_profile = profile
-                tags_str = " ".join(f"[{t.label}]" for t in profile.visible_tags)
-                stat_upper = profile.status.value.upper()
-                langs_str = ", ".join(profile.stack.languages) or "N/A"
-                fws_str = ", ".join(profile.stack.frameworks) or "none"
-                apps_str = ", ".join(profile.architecture.application_type) or "N/A"
-                tests_str = ", ".join(profile.quality.test_frameworks) or "none"
-                type_check = "✓" if profile.quality.typechecking else "✗"
-                lint_check = "✓" if profile.quality.linting else "✗"
+                self.query_one("#welcome", WelcomePanel).refresh_info()
+                tags_str = " ".join(f"#{t.label}" for t in profile.visible_tags)
+                profile_lbl = f"[bold {Colors.PRIMARY}]Perfil:[/bold {Colors.PRIMARY}]"
                 summary_lines = [
-                    f"[bold cyan]Project Profile:[/bold cyan] {profile.repository} ({stat_upper})",
-                    f"[bold]Visible Tags:[/bold] {tags_str}",
-                    f"[bold]Languages:[/bold] {langs_str}",
-                    f"[bold]Frameworks:[/bold] {fws_str}",
-                    f"[bold]Type:[/bold] {apps_str}",
-                    f"[bold]Quality:[/bold] Tests: {tests_str}",
-                    f"[bold]Checks:[/bold] Typing: {type_check} | Linting: {lint_check}",
+                    f"{profile_lbl} {profile.repository}",
+                    f"[bold]Etiquetas:[/bold] {tags_str}",
+                    f"[bold]Lenguajes:[/bold] {', '.join(profile.stack.languages) or 'N/A'}",
+                    (
+                        f"[bold]Frameworks:[/bold] "
+                        f"{', '.join(profile.stack.frameworks) or 'ninguno'}"
+                    ),
+                    (
+                        f"[bold]Tipo:[/bold] "
+                        f"{', '.join(profile.architecture.application_type) or 'N/A'}"
+                    ),
+                    (
+                        f"[bold]Tests:[/bold] "
+                        f"{', '.join(profile.quality.test_frameworks) or 'ninguno'}"
+                    ),
                 ]
                 self._append_mya_message("\n".join(summary_lines))
 
@@ -498,7 +625,13 @@ class MyaApp(App[None]):
 
             case SlashCommandKind.INFO:
                 obs = ObservabilityService()
-                self._append_mya_message(obs.render_info(self.session))
+                self._append_mya_message(
+                    obs.render_info(
+                        self.session,
+                        gateway=self.gateway,
+                        model_id=self.mya_agent.model_id,
+                    )
+                )
 
             case SlashCommandKind.TELEMETRY:
                 obs = ObservabilityService()
@@ -512,37 +645,49 @@ class MyaApp(App[None]):
 
             case SlashCommandKind.FAST:
                 handler = CommandHandlerService()
-                _, msg = handler.handle_fast(cmd.argument)
+                _, msg = await self._think(handler.handle_fast, cmd.argument)
                 self._append_mya_message(msg)
 
             case SlashCommandKind.SCI_MODE:
                 handler = CommandHandlerService()
-                res = handler.handle_sci_mode(cmd.argument)
+                res = await self._think(
+                    handler.handle_sci_mode, cmd.argument, label="Análisis científico en curso"
+                )
                 self._append_mya_message(res)
 
             case SlashCommandKind.DEEP_RESEARCH:
                 handler = CommandHandlerService()
-                res = handler.handle_deep_research(cmd.argument)
+                res = await self._think(
+                    handler.handle_deep_research, cmd.argument, label="Investigando a fondo"
+                )
                 self._append_mya_message(res)
 
             case SlashCommandKind.OPTIMIZE:
                 handler = CommandHandlerService()
-                res = handler.handle_optimize(cmd.argument)
+                res = await self._think(
+                    handler.handle_optimize, cmd.argument, label="Revisando rendimiento"
+                )
                 self._append_mya_message(res)
 
             case SlashCommandKind.DECISION:
                 handler = CommandHandlerService()
-                res = handler.handle_decision(cmd.argument)
+                res = await self._think(
+                    handler.handle_decision, cmd.argument, label="Consultando 5 perspectivas"
+                )
                 self._append_mya_message(res)
 
             case SlashCommandKind.CLOUD:
                 handler = CommandHandlerService()
-                res = handler.handle_cloud(cmd.argument)
+                res = await self._think(
+                    handler.handle_cloud, cmd.argument, label="Revisando arquitectura cloud"
+                )
                 self._append_mya_message(res)
 
             case SlashCommandKind.SECURITY:
                 handler = CommandHandlerService()
-                res = handler.handle_security(cmd.argument)
+                res = await self._think(
+                    handler.handle_security, cmd.argument, label="Auditando seguridad"
+                )
                 self._append_mya_message(res)
 
             case SlashCommandKind.THEME:
@@ -553,18 +698,17 @@ class MyaApp(App[None]):
                     avail = ", ".join(t.name for t in registry.list_themes())
                     curr = registry.active_theme.name
                     self._append_mya_message(
-                        f"{badge} [bold]THEME SETTINGS[/bold]\n"
-                        f"  Active theme: [bold green]{curr}[/bold green]\n"
-                        f"  Available:    {avail}\n\n"
+                        f"{badge} [bold]CONFIGURACIÓN DE TEMA[/bold]\n"
+                        f"  Tema activo:  [bold green]{curr}[/bold green]\n"
+                        f"  Disponibles:  {avail}\n\n"
                         "[dim]Uso: /theme <nombre_del_tema>[/dim]"
                     )
                 else:
                     try:
                         th = registry.set_active_theme(arg)
+                        self.theme = PRESENTATION_TO_TEXTUAL.get(th.name, "mya")
                         self._append_mya_message(
-                            f"{badge} [bold]Tema cambiado a '{th.name}'[/bold]\n"
-                            f"  {th.description}\n"
-                            f"  [dim]Densidad: {th.density} | ASCII only: {th.ascii_only}[/dim]"
+                            f"{badge} [bold]Tema cambiado a '{th.name}'[/bold]\n  {th.description}"
                         )
                     except ValueError as err:
                         self._append_mya_message(f"[bold red]Error:[/bold red] {err}")
@@ -575,10 +719,9 @@ class MyaApp(App[None]):
                 badge = format_command_badge("/motion")
                 if not arg:
                     self._append_mya_message(
-                        f"{badge} [bold]MOTION MODE[/bold]\n"
-                        f"  Current: [bold green]{ctrl.mode.value}[/bold green]\n"
-                        "  Modes:   full (spinners/transitions), "
-                        "reduced (transitions only), off (no animation)\n\n"
+                        f"{badge} [bold]MODO DE ANIMACIÓN[/bold]\n"
+                        f"  Actual: [bold green]{ctrl.mode.value}[/bold green]\n"
+                        "  Modos:  full, reduced, off\n\n"
                         "[dim]Uso: /motion full|reduced|off[/dim]"
                     )
                 else:
@@ -597,15 +740,15 @@ class MyaApp(App[None]):
                 if not arg:
                     curr = getattr(self, "_avatar_mode", "dot")
                     self._append_mya_message(
-                        f"{badge} [bold]MYA AVATAR MODE[/bold]\n"
-                        f"  Current: [bold green]{curr}[/bold green]\n"
-                        f"  Modes:   {', '.join(valid_modes)}\n\n"
+                        f"{badge} [bold]ESTILO DE AVATAR[/bold]\n"
+                        f"  Actual: [bold green]{curr}[/bold green]\n"
+                        f"  Modos:  {', '.join(valid_modes)}\n\n"
                         "[dim]Uso: /avatar dot|glyph|ascii|minimal[/dim]"
                     )
                 elif arg not in valid_modes:
                     self._append_mya_message(
-                        f"[bold red]Error:[/bold red] Avatar mode '{arg}' desconocido. "
-                        f"Elija de: {', '.join(valid_modes)}"
+                        f"[bold red]Error:[/bold red] Modo de avatar '{arg}' desconocido. "
+                        f"Elige entre: {', '.join(valid_modes)}"
                     )
                 else:
                     self._avatar_mode = arg
@@ -616,18 +759,19 @@ class MyaApp(App[None]):
                     theme = ThemeRegistry.get_instance().active_theme
                     preview = renderer.render_avatar(rs, ascii_only=theme.ascii_only)
                     self._append_mya_message(
-                        f"{badge} [bold]Avatar de Mya cambiado a '{arg}':[/bold]\n\n"
-                        f"{preview}"
+                        f"{badge} [bold]Avatar cambiado a '{arg}':[/bold]\n\n{preview}"
                     )
 
             case SlashCommandKind.COMPACT:
                 badge = format_command_badge("/compact")
+                self.screen.add_class("-compact")
                 self._append_mya_message(
                     f"{badge} Densidad visual cambiada a [bold green]compacto[/bold green]."
                 )
 
             case SlashCommandKind.DENSE:
                 badge = format_command_badge("/dense")
+                self.screen.remove_class("-compact")
                 self._append_mya_message(
                     f"{badge} Densidad visual cambiada a [bold green]cómodo[/bold green]."
                 )
@@ -643,10 +787,11 @@ class MyaApp(App[None]):
                 await self._handle_natural_input(prompt.strip())
 
             case _:
-                self._append_system_message(
-                    f"[{Colors.DIM}]Command /{cmd.kind.value} "
-                    f"will be available in a future version.[/{Colors.DIM}]"
+                msg = (
+                    f"[{Colors.DIM}]Comando /{cmd.kind.value} disponible "
+                    f"en una versión futura.[/{Colors.DIM}]"
                 )
+                self._append_system_message(msg)
 
     def _save_env_var(self, key: str, value: str) -> None:
         """Safely saves or updates a key=value in .env file."""
@@ -677,15 +822,16 @@ class MyaApp(App[None]):
 
     def _refresh_ui_model(self) -> None:
         """Refresh model display in status bar and welcome panel."""
+        self._update_welcome_panel()
         try:
-            welcome = self.query_one("#welcome", WelcomePanel)
-            welcome.model_id = self.mya_agent.model_id
-            welcome.refresh()
-        except Exception:
-            pass
-        try:
-            status_bar = self.query_one("#status-bar", Static)
-            status_bar.update(self._render_status_bar())
+            status_bar = self.query_one("#status-bar", StatusLine)
+            status_bar.set(
+                project=getattr(self.session, "repository", None),
+                branch=getattr(self.session, "branch", None),
+                model=self.model_id,
+                job=getattr(self.session, "current_job_id", None),
+                dirty=not getattr(self.session, "working_tree_clean", True),
+            )
         except Exception:
             pass
 
@@ -749,47 +895,28 @@ class MyaApp(App[None]):
                 )
                 return
 
+            self.gateway.discovery_cache.invalidate(provider="openai")
+            profile = self.gateway.validate_credential("openai")
+
             if self.mya_agent.model_id in ("mock-mya", "mock"):
-                self.mya_agent.model_id = "gpt-4o"
+                self.set_model("gpt-4o", provider="openai")
                 self._save_env_var("MYA_MODEL", "gpt-4o")
                 os.environ["MYA_MODEL"] = "gpt-4o"
                 self._refresh_ui_model()
 
             masked = _mask(key_value)
+            status_str = (
+                f"[bold green]✓ {profile.status.value}[/bold green]"
+                if profile.status.value == "VALID"
+                else f"[yellow]{profile.status.value}[/yellow]"
+            )
             self._append_mya_message(
                 f"{badge} [bold green]✓ Clave de OpenAI guardada exitosamente[/bold green]\n\n"
                 f"  • Clave:         {masked}\n"
+                f"  • Fingerprint:   [dim]{profile.fingerprint}[/dim]\n"
+                f"  • Estado:        {status_str}\n"
                 f"  • Persistencia:  .env\n"
                 f"  • Proveedor:     'openai' activo\n"
-                f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
-            )
-
-        elif provider in ("gemini", "google"):
-            self._save_env_var("GEMINI_API_KEY", key_value)
-            os.environ["GEMINI_API_KEY"] = key_value
-            os.environ["GOOGLE_API_KEY"] = key_value
-            try:
-                from myagentos.gateway.gemini_adapter import GeminiAdapter
-
-                self.gateway.register_adapter("google", GeminiAdapter(api_key=key_value))
-            except Exception as err:
-                self._append_mya_message(
-                    f"{badge} [bold red]Error al registrar GeminiAdapter:[/bold red] {err}"
-                )
-                return
-
-            if self.mya_agent.model_id in ("mock-mya", "mock"):
-                self.mya_agent.model_id = "gemini-2.0-flash"
-                self._save_env_var("MYA_MODEL", "gemini-2.0-flash")
-                os.environ["MYA_MODEL"] = "gemini-2.0-flash"
-                self._refresh_ui_model()
-
-            masked = _mask(key_value)
-            self._append_mya_message(
-                f"{badge} [bold green]✓ Clave de Google Gemini guardada[/bold green]\n\n"
-                f"  • Clave:         {masked}\n"
-                f"  • Persistencia:  .env\n"
-                f"  • Proveedor:     'google' activo\n"
                 f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
             )
 
@@ -806,143 +933,322 @@ class MyaApp(App[None]):
                 )
                 return
 
+            self.gateway.discovery_cache.invalidate(provider="anthropic")
+            profile = self.gateway.validate_credential("anthropic")
+
             if self.mya_agent.model_id in ("mock-mya", "mock"):
-                self.mya_agent.model_id = "claude-3-5-sonnet-latest"
+                self.set_model("claude-3-5-sonnet-latest", provider="claude")
                 self._save_env_var("MYA_MODEL", "claude-3-5-sonnet-latest")
                 os.environ["MYA_MODEL"] = "claude-3-5-sonnet-latest"
                 self._refresh_ui_model()
 
             masked = _mask(key_value)
+            status_str = (
+                f"[bold green]✓ {profile.status.value}[/bold green]"
+                if profile.status.value == "VALID"
+                else f"[yellow]{profile.status.value}[/yellow]"
+            )
             self._append_mya_message(
-                f"{badge} [bold green]✓ Clave de Anthropic Claude guardada[/bold green]\n\n"
+                f"{badge} [bold green]✓ Clave de Anthropic guardada exitosamente"
+                "[/bold green]\n\n"
                 f"  • Clave:         {masked}\n"
+                f"  • Fingerprint:   [dim]{profile.fingerprint}[/dim]\n"
+                f"  • Estado:        {status_str}\n"
                 f"  • Persistencia:  .env\n"
                 f"  • Proveedor:     'anthropic' activo\n"
                 f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
             )
 
+        elif provider in ("gemini", "google"):
+            self._save_env_var("GEMINI_API_KEY", key_value)
+            os.environ["GEMINI_API_KEY"] = key_value
+            try:
+                from myagentos.gateway.gemini_adapter import GeminiAdapter
+
+                self.gateway.register_adapter("google", GeminiAdapter(api_key=key_value))
+            except Exception as err:
+                self._append_mya_message(
+                    f"{badge} [bold red]Error al registrar GeminiAdapter:[/bold red] {err}"
+                )
+                return
+
+            self.gateway.discovery_cache.invalidate(provider="google")
+            profile = self.gateway.validate_credential("google")
+
+            if self.mya_agent.model_id in ("mock-mya", "mock"):
+                self.set_model("gemini-2.0-flash", provider="gemini")
+                self._save_env_var("MYA_MODEL", "gemini-2.0-flash")
+                os.environ["MYA_MODEL"] = "gemini-2.0-flash"
+                self._refresh_ui_model()
+
+            masked = _mask(key_value)
+            status_str = (
+                f"[bold green]✓ {profile.status.value}[/bold green]"
+                if profile.status.value == "VALID"
+                else f"[yellow]{profile.status.value}[/yellow]"
+            )
+            self._append_mya_message(
+                f"{badge} [bold green]✓ Clave de Google Gemini guardada exitosamente"
+                "[/bold green]\n\n"
+                f"  • Clave:         {masked}\n"
+                f"  • Fingerprint:   [dim]{profile.fingerprint}[/dim]\n"
+                f"  • Estado:        {status_str}\n"
+                f"  • Persistencia:  .env\n"
+                f"  • Proveedor:     'google' activo\n"
+                f"  • Modelo activo: [bold cyan]{self.mya_agent.model_id}[/bold cyan]"
+            )
         else:
             self._append_mya_message(
-                f"{badge} [bold red]Proveedor desconocido '{provider}'.[/bold red]\n"
-                f"Proveedores soportados: [bold]claude[/bold], [bold]openai[/bold], "
-                "[bold]gemini[/bold]"
+                f"{badge} [bold red]Proveedor desconocido:[/bold red] '{provider}'. "
+                f"Use: [bold]claude[/bold], [bold]openai[/bold] o [bold]gemini[/bold]."
             )
 
     def _handle_model_command(self, argument: str) -> None:
-        """Handle /model command to view or switch active model."""
+        """Handle /model command to view, discover, filter, or switch the active LLM (§10, §11, §12, §13)."""
         badge = format_command_badge("/model")
         arg = argument.strip()
+
+        # Determine current provider from active model
+        current_model = self.mya_agent.model_id
+        current_provider = "mock"
+        if (
+            "gpt" in current_model
+            or "o1" in current_model
+            or "o3" in current_model
+            or "openai" in current_model
+        ):
+            current_provider = "openai"
+        elif "claude" in current_model or "anthropic" in current_model:
+            current_provider = "anthropic"
+        elif "gemini" in current_model or "google" in current_model:
+            current_provider = "google"
+
+        # Case 1: /model (no arguments) -> Show live catalog, credential status, identity (§10)
         if not arg:
-            curr = self.mya_agent.model_id
-            adapters = list(self.gateway.adapters.keys())
+            effective = self.gateway.get_effective_model_set(
+                current_provider, active_model=current_model
+            )
+            profile = self.gateway.get_credential_profile(current_provider)
+            status_val = profile.status.value if profile else "UNKNOWN"
+            status_icon = "✓" if status_val == "VALID" else "✗"
+            status_color = "green" if status_val == "VALID" else "red"
+
+            lines = [
+                f"{badge} [bold]MODELOS DISPONIBLES[/bold]\n",
+                f"  • Provider:      [bold]{current_provider.capitalize()}[/bold]",
+                f"  • Credential:    [{status_color}]{status_icon} {status_val}[/{status_color}]",
+            ]
+            if profile:
+                lines.append(f"  • Fingerprint:   [dim]{profile.fingerprint}[/dim]")
+                if profile.identity:
+                    if profile.identity.organization:
+                        lines.append(f"  • Organization:  {profile.identity.organization}")
+                    if profile.identity.project:
+                        lines.append(f"  • Project:       {profile.identity.project}")
+                    if profile.identity.quota_scope:
+                        lines.append(f"  • Quota Scope:   {profile.identity.quota_scope}")
+                    if not (
+                        profile.identity.organization
+                        or profile.identity.project
+                        or profile.identity.quota_scope
+                    ):
+                        lines.append("  • Identity:      Not provided by provider")
+                else:
+                    lines.append("  • Identity:      Not provided by provider")
+
+            lines.append("\n[bold]Catálogo accesible:[/bold]")
+            if effective.available_models:
+                for mid in effective.available_models:
+                    prefix = "  [bold cyan]> " if mid == current_model else "    "
+                    suffix = " (activo)[/bold cyan]" if mid == current_model else ""
+                    lines.append(f"{prefix}{mid}{suffix}")
+            else:
+                lines.append("  [dim]No hay modelos disponibles con la credencial activa.[/dim]")
+
+            if effective.restricted_models:
+                lines.append(
+                    f"\n[dim]Modelos restringidos para esta credencial: {', '.join(effective.restricted_models)}[/dim]"
+                )
+
+            lines.extend(
+                [
+                    "",
+                    "[dim]Uso:[/dim]",
+                    "  • [bold]/model <id>[/bold]        Seleccionar modelo (ej: gpt-4o, claude-3-5-sonnet-latest)",
+                    "  • [bold]/model <filtro>[/bold]    Filtrar catálogo (ej: /model coder, /model mini)",
+                    "  • [bold]/model refresh[/bold]     Actualizar catálogo en vivo desde el proveedor",
+                ]
+            )
+            self._append_mya_message("\n".join(lines))
+            return
+
+        # Case 2: /model refresh -> Force live discovery (§13)
+        if arg.lower() == "refresh":
+            effective = self.gateway.get_effective_model_set(
+                current_provider, active_model=current_model, force_refresh=True
+            )
+            disc = self.gateway.discover_models(current_provider)
+            disc_count = len(disc.models) if disc else len(effective.available_models)
+            comp_count = len(effective.available_models)
+            filt_count = len(effective.policy_filtered_models)
+
+            lines = [
+                f"{badge} [bold green]✓ Catálogo actualizado desde el proveedor[/bold green]\n",
+                f"  • Descubiertos:  {disc_count} modelos",
+                f"  • Compatibles:   {comp_count}",
+                f"  • Filtrados:     {filt_count} por política/ciclo de vida\n",
+                "[bold]Modelos disponibles:[/bold]",
+            ]
+            for mid in effective.available_models:
+                prefix = "  [bold cyan]> " if mid == current_model else "    "
+                suffix = " (activo)[/bold cyan]" if mid == current_model else ""
+                lines.append(f"{prefix}{mid}{suffix}")
+
+            self._append_mya_message("\n".join(lines))
+            return
+
+        # Case 3: /model <id> or /model <query>
+        arg_lower = arg.lower()
+        target_provider = current_provider
+        if arg_lower.startswith("mock"):
+            target_provider = "mock"
+        elif "claude" in arg_lower or "anthropic" in arg_lower:
+            target_provider = "anthropic"
+        elif "gpt" in arg_lower or "o1" in arg_lower or "o3" in arg_lower:
+            target_provider = "openai"
+        elif "gemini" in arg_lower:
+            target_provider = "google"
+
+        # Check adapter presence for target provider
+        if target_provider != current_provider and target_provider not in self.gateway.adapters:
+            env_var = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "google": "GEMINI_API_KEY",
+            }.get(target_provider, "")
             self._append_mya_message(
-                f"{badge} [bold]MODELO LLM DE MYA[/bold]\n\n"
-                f"  • Modelo activo:            [bold cyan]{curr}[/bold cyan]\n"
-                f"  • Adaptadores registrados:  {', '.join(adapters)}\n\n"
-                f"[dim]Modelos habituales:[/dim]\n"
-                f"  • Claude:  claude-3-5-sonnet-latest, claude-3-5-haiku-latest\n"
-                f"  • OpenAI:  gpt-4o, gpt-4o-mini, o1, o3-mini\n"
-                f"  • Gemini:  gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash\n"
-                f"  • Mock:    mock-mya (simulador local)\n\n"
-                f"[dim]Uso: /model <nombre_del_modelo>[/dim]"
+                f"{badge} [bold yellow]Advertencia:[/bold yellow] El proveedor '{target_provider}' "
+                f"no tiene adaptador configurado para '{arg}'.\n"
+                f"Configure la clave ejecutando: [bold]/key {target_provider} <su_clave>[/bold] "
+                f"(o defina {env_var} en su entorno/.env)."
             )
             return
 
-        target_model = arg
-        if "claude" in target_model or "anthropic" in target_model:
-            if "anthropic" not in self.gateway.adapters:
-                key = os.getenv("ANTHROPIC_API_KEY")
-                if key:
-                    from myagentos.gateway.claude_adapter import ClaudeAdapter
+        effective = self.gateway.get_effective_model_set(
+            target_provider, active_model=current_model
+        )
 
-                    self.gateway.register_adapter("anthropic", ClaudeAdapter(api_key=key))
-                else:
-                    self._append_mya_message(
-                        f"{badge} [bold yellow]Advertencia:[/bold yellow] "
-                        "ANTHROPIC_API_KEY no configurada.\n"
-                        f"Configúrala primero con: [bold]/key claude <tu_clave>[/bold]"
-                    )
-        elif "gpt" in target_model or "openai" in target_model:
-            if "openai" not in self.gateway.adapters:
-                key = os.getenv("OPENAI_API_KEY")
-                if key:
-                    from myagentos.gateway.openai_adapter import OpenAIAdapter
+        # Check if arg directly matches an available model ID (case-insensitive)
+        matched_id = next((m for m in effective.available_models if m.lower() == arg_lower), None)
+        if matched_id:
+            self.set_model(matched_id, provider=target_provider, notify_chat=True)
+            self._save_env_var("MYA_MODEL", matched_id)
+            os.environ["MYA_MODEL"] = matched_id
+            self._refresh_ui_model()
 
-                    self.gateway.register_adapter("openai", OpenAIAdapter(api_key=key))
-                else:
-                    self._append_mya_message(
-                        f"{badge} [bold yellow]Advertencia:[/bold yellow] "
-                        "OPENAI_API_KEY no configurada.\n"
-                        f"Configúrala primero con: [bold]/key openai <tu_clave>[/bold]"
-                    )
-        elif "gemini" in target_model:
-            if "google" not in self.gateway.adapters:
-                key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-                if key:
-                    from myagentos.gateway.gemini_adapter import GeminiAdapter
+            self._append_mya_message(
+                f"{badge} [bold green]✓ Modelo cambiado a:[/bold green] [bold cyan]{matched_id}[/bold cyan]\n"
+                f"  • Proveedor: '{target_provider}'\n"
+                f"  • Persistencia: .env (MYA_MODEL={matched_id})"
+            )
+            return
 
-                    self.gateway.register_adapter("google", GeminiAdapter(api_key=key))
-                else:
-                    self._append_mya_message(
-                        f"{badge} [bold yellow]Advertencia:[/bold yellow] "
-                        "GEMINI_API_KEY no configurada.\n"
-                        f"Configúrala primero con: [bold]/key gemini <tu_clave>[/bold]"
-                    )
+        # Guarded check: Is it in restricted or policy filtered models, or credential invalid? (§12)
+        if arg_lower in [m.lower() for m in effective.restricted_models]:
+            self._append_mya_message(
+                f"{badge} [bold red]No puedes utilizar \"{arg}\" con la credencial activa.[/bold red]\n\n"
+                f"Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
+                f"Motivo:\nLa credencial actual no tiene acceso a este modelo."
+            )
+            return
 
-        self.mya_agent.model_id = target_model
-        os.environ["MYA_MODEL"] = target_model
-        self._save_env_var("MYA_MODEL", target_model)
-        self._refresh_ui_model()
+        if arg_lower in [m.lower() for m in effective.policy_filtered_models]:
+            self._append_mya_message(
+                f"{badge} [bold red]No puedes utilizar \"{arg}\" con la credencial activa.[/bold red]\n\n"
+                f"Estado:\n[bold yellow]FILTRADO[/bold yellow]\n\n"
+                f"Motivo:\nEl modelo está retirado o filtrado por política del sistema."
+            )
+            return
 
+        from myagentos.gateway.credentials import CredentialStatus
+
+        if effective.credential_status in (CredentialStatus.INVALID, CredentialStatus.REVOKED):
+            self._append_mya_message(
+                f"{badge} [bold red]No puedes utilizar \"{arg}\" con la credencial activa.[/bold red]\n\n"
+                f"Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
+                f"Motivo:\nLa credencial para '{target_provider}' no es válida o fue revocada."
+            )
+            return
+
+        # Otherwise, treat as filter query (§11)
+        query_matches = [
+            m for m in effective.available_models if arg_lower in m.lower()
+        ]
+        if query_matches:
+            lines = [
+                f"{badge} [bold]MODELOS DISPONIBLES[/bold] [dim](filtro: \"{arg}\")[/dim]\n",
+                f"  • Provider:   [bold]{target_provider.capitalize()}[/bold]\n",
+            ]
+            for mid in query_matches:
+                prefix = "  [bold cyan]> " if mid == current_model else "    "
+                suffix = " (activo)[/bold cyan]" if mid == current_model else ""
+                lines.append(f"{prefix}{mid}{suffix}")
+            lines.extend(
+                [
+                    "",
+                    "[dim]Para seleccionar uno: /model <nombre_exacto>[/dim]",
+                ]
+            )
+            self._append_mya_message("\n".join(lines))
+            return
+
+        # No model matched and query returned nothing
         self._append_mya_message(
-            f"{badge} [bold green]✓ Modelo activo cambiado a '{target_model}'[/bold green]\n"
-            f"  Guardado en .env (MYA_MODEL={target_model})"
+            f"{badge} [bold yellow]No se encontraron modelos disponibles que coincidan con:[/bold yellow] '{arg}'\n"
+            f"[dim]Ejecute /model para ver la lista completa o /model refresh para actualizar.[/dim]"
         )
 
     async def _handle_natural_input(self, text: str) -> None:
-        """Handle natural language input — route through Mya LLM."""
-        if not text:
-            return
-
-        # Distinguish conversational dialogue vs task interpretation
-        lower = text.lower()
-        conversational_starters = [
+        """Handle conversational or task intent input from the user."""
+        pure_conversation_prefixes = [
             "hola",
             "buenas",
+            "buenos días",
+            "buenas tardes",
+            "buenas noches",
             "hello",
             "hi",
-            "quién eres",
-            "quien eres",
+            "hey",
             "cómo estás",
             "como estas",
-            "qué puedes hacer",
+            "how are you",
+            "quién eres",
+            "quien eres",
+            "who are you",
+            "qué eres",
+            "que eres",
             "gracias",
+            "muchas gracias",
+            "thanks",
+            "thank you",
         ]
-        action_keywords = [
-            "arregla",
-            "crea",
-            "añade",
-            "modifica",
-            "test",
-            "elimina",
-            "refactor",
-            "cambia",
-        ]
-        is_pure_conversation = any(c in lower for c in conversational_starters) and not any(
-            a in lower for a in action_keywords
+        text_lower = text.lower().strip()
+        is_pure_conversation = any(
+            text_lower.startswith(p) or text_lower == p for p in pure_conversation_prefixes
         )
 
         if is_pure_conversation:
-            response = self.mya_agent.converse(text, session=self.session)
+            response = await self._think(self._converse, text)
             self._append_mya_message(response)
             return
 
         # Interpret intent through Mya LLM
-        result = self.mya_agent.interpret(text, session=self.session)
+        result = await self._think(self._interpret, text, label="Interpretando tu petición")
         if result.resolved and result.intent:
             commentary = (
                 result.explanation
-                or "Entendido. He sintetizado el objetivo para el Job Controller."
+                or f"Entendido. Objetivo: '{result.intent.objective}'. "
+                "Coordinando con el Job Controller."
             )
             lines = [
                 commentary,
@@ -954,12 +1260,6 @@ class MyaApp(App[None]):
             if result.intent.repository_scope:
                 lines.append(f"[bold]Alcance:[/bold] {result.intent.repository_scope}")
             lines.append(f"[bold]Modo:[/bold] {result.intent.requested_mode.value}")
-            lines.extend(
-                [
-                    "",
-                    f"[{Colors.DIM}]UserIntent entregado al Job Controller.[/{Colors.DIM}]",
-                ]
-            )
             self._append_mya_message("\n".join(lines))
         elif result.questions:
             lines = [
@@ -970,111 +1270,141 @@ class MyaApp(App[None]):
                 lines.append(f"  • {q}")
             self._append_mya_message("\n".join(lines))
         else:
-            response = self.mya_agent.converse(text, session=self.session)
+            response = await self._think(self._converse, text)
             self._append_mya_message(response)
+
+    def _converse(self, text: str) -> str:
+        return self.mya_agent.converse(text, session=self.session)
+
+    def _interpret(self, text: str) -> Any:
+        return self.mya_agent.interpret(text, session=self.session)
 
     def _show_status(self) -> None:
         """Show current project status."""
         s = self.session
         status = (
-            f"[{Colors.SUCCESS}]clean[/{Colors.SUCCESS}]"
+            f"[{Colors.SUCCESS}]● limpio[/{Colors.SUCCESS}]"
             if s.working_tree_clean
-            else f"[{Colors.WARNING}]dirty[/{Colors.WARNING}]"
+            else f"[{Colors.WARNING}]● cambios sin commit[/{Colors.WARNING}]"
         )
 
         lines = [
-            f"[bold]Project:[/bold]  {s.repository or 'none'}",
-            f"[bold]Branch:[/bold]   {s.branch or 'N/A'}",
-            f"[bold]Commit:[/bold]   {s.commit_short or 'N/A'}",
-            f"[bold]Status:[/bold]   {status}",
-            f"[bold]Session:[/bold]  {s.session_id}",
+            f"[bold]Proyecto:[/bold]  {s.repository or 'sin proyecto'}",
+            f"[bold]Rama:[/bold]      {s.branch or 'N/A'}",
+            f"[bold]Commit:[/bold]    {s.commit_short or 'N/A'}",
+            f"[bold]Estado:[/bold]    {status}",
+            f"[bold]Sesión:[/bold]    {s.session_id}",
         ]
 
         if s.current_job_id:
-            lines.append(f"[bold]Job:[/bold]      {s.current_job_id}")
+            lines.append(f"[bold]Job:[/bold]       {s.current_job_id}")
 
         self._append_mya_message("\n".join(lines))
 
+    # ── Conversation rendering ──────────────────────────────────────
+
+    def _append_message(
+        self,
+        content: RenderableType,
+        role: MessageRole,
+        provider: str | None = None,
+    ) -> None:
+        conv = self.query_one("#conversation", VerticalScroll)
+        prov = provider or (self.provider if role in ("mya", "agent") else None)
+        conv.mount(ChatMessage(content, role=role, provider=prov))
+        self.call_after_refresh(conv.scroll_end, animate=False)
+
     def _append_user_message(self, text: str) -> None:
-        """Add a user message to the conversation with category badge styling for commands."""
-        conv = self.query_one("#conversation", VerticalScroll)
+        """Add a user message; slash commands get their category badge."""
         formatted_text = text
-        if text.strip().startswith("/"):
-            parts = text.strip().split(maxsplit=1)
-            cmd_part = parts[0]
+        if text.startswith("/"):
+            parts = text.split(maxsplit=1)
             arg_part = f" {parts[1]}" if len(parts) > 1 else ""
-            badge = format_command_badge(cmd_part)
-            formatted_text = f"{badge}{arg_part}"
+            formatted_text = f"{format_command_badge(parts[0])}{arg_part}"
+        self._append_message(formatted_text, "user")
 
-        msg = Static(
-            f"[bold]{Icons.PROMPT}[/bold] {formatted_text}",
-            classes="user-message",
-        )
-        conv.mount(msg)
-        msg.scroll_visible()
+    def _append_mya_message(self, content: RenderableType) -> None:
+        rendered: RenderableType = content
+        if isinstance(content, str) and not content.startswith("["):
+            rendered = Markdown(content)
+        self._append_message(rendered, "agent", provider=self.provider)
 
-    def _append_mya_message(self, text: str) -> None:
-        """Add a Mya message to the conversation."""
-        conv = self.query_one("#conversation", VerticalScroll)
-        msg = Static(
-            f"[bold {Colors.PRIMARY}]Mya {Icons.ARROW}[/bold {Colors.PRIMARY}] {text}",
-            classes="mya-message",
-        )
-        conv.mount(msg)
-        msg.scroll_visible()
+    def _append_tool_message(self, content: RenderableType) -> None:
+        self._append_message(content, "tool")
 
     def _append_system_message(self, text: str) -> None:
-        """Add a system message to the conversation."""
-        conv = self.query_one("#conversation", VerticalScroll)
-        msg = Static(text, classes="system-message")
-        conv.mount(msg)
-        msg.scroll_visible()
+        self._append_message(text, "system")
 
-    def _render_status_bar(self) -> str:
-        """Render the compact status bar."""
-        s = self.session
-        parts = [
-            f"[{Colors.DIM}]{s.repository or 'no project'}[/{Colors.DIM}]",
-            f"[{Colors.DIM}]{s.branch or ''}[/{Colors.DIM}]",
-        ]
-        if hasattr(self, "mya_agent") and self.mya_agent and self.mya_agent.model_id:
-            parts.append(f"[{Colors.DIM}]model: {self.mya_agent.model_id}[/{Colors.DIM}]")
-        if s.current_job_id:
-            parts.append(f"job: {s.current_job_id}")
-        return "  │  ".join(parts)
+    def _append_error_message(self, text: str) -> None:
+        self._append_message(text, "error")
+
+    async def _clear_conversation(self) -> None:
+        conv = self.query_one("#conversation", VerticalScroll)
+        await conv.remove_children([child for child in conv.children if child.id != "welcome"])
+
+    # ── Actions ─────────────────────────────────────────────────────
 
     def action_cancel(self) -> None:
-        """Handle Ctrl+C — clear input or offer to cancel job."""
-        inp = self.query_one("#prompt-input", Input)
-        if inp.value:
-            inp.value = ""
+        """Ctrl+C — cancel running worker, clear input, or offer to cancel job."""
+        if self._busy and self._active_worker is not None:
+            self._active_worker.cancel()
+        elif self._prompt.value:
+            self._fill_prompt("")
         elif self.session.current_job_id:
             self._append_mya_message(
-                f"¿Detener el job {self.session.current_job_id}?\n\n[A] Detener  [N] Continuar"
+                f"¿Detener el job {self.session.current_job_id}?\n\n\\[A] Detener   \\[N] Continuar"
             )
         else:
-            self._append_system_message(f"[{Colors.DIM}]Ctrl+D para salir.[/{Colors.DIM}]")
+            self.notify("Pulsa Ctrl+D para salir.", timeout=2)
 
     def action_escape(self) -> None:
-        """Handle Escape — clear input."""
-        inp = self.query_one("#prompt-input", Input)
-        inp.value = ""
+        """Escape — close suggestions first, then clear prompt."""
+        if self._suggestions.display:
+            self._suggestions.display = False
+        else:
+            self._fill_prompt("")
+
+    async def action_clear_conversation(self) -> None:
+        await self._clear_conversation()
+
+    def action_show_commands(self) -> None:
+        self._submit_text("/help")
+
+    async def action_next_model(self) -> None:
+        """F2 — Cycle through models on the fly (§ demo_ui.py)."""
+        demo_models = ["mock-mya", "claude-sonnet-5-5", "gpt-5", "gemini-2.5-pro", "llama3.1"]
+        curr = self.model_id
+        try:
+            idx = demo_models.index(curr)
+            next_idx = (idx + 1) % len(demo_models)
+        except ValueError:
+            next_idx = 0
+        next_model = demo_models[next_idx]
+        self.set_model(next_model, notify_chat=True)
 
     def action_open_projects(self) -> None:
         """Open the Project Explorer screen."""
 
         def on_return(_: Any = None) -> None:
-            # Refresh header/status bar/welcome when returning from Project Explorer
             try:
-                self.query_one("#welcome", WelcomePanel).refresh()
-                self.query_one("#status-bar", Static).update(self._render_status_bar())
+                self.query_one("#welcome", WelcomePanel).refresh_info()
+                status_bar = self.query_one("#status-bar", StatusLine)
+                status_bar.set(
+                    project=getattr(self.session, "repository", None),
+                    branch=getattr(self.session, "branch", None),
+                    model=self.model_id,
+                    job=getattr(self.session, "current_job_id", None),
+                    dirty=not getattr(self.session, "working_tree_clean", True),
+                )
             except Exception:
                 pass
+            self._prompt.focus()
 
         self.push_screen(ProjectsScreen(session=self.session), on_return)
 
     async def action_quit(self) -> None:
-        """Handle Ctrl+D — exit."""
+        if self._busy and self._active_worker is not None:
+            self._active_worker.cancel()
         self.exit()
 
 

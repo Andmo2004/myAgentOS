@@ -5,6 +5,8 @@ from typing import Any
 from pydantic import BaseModel
 
 from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
+from myagentos.gateway.credentials import CredentialStatus, IdentityInfo
+from myagentos.gateway.discovery import DiscoveredModel
 
 
 class MockProviderAdapter(ProviderAdapter):
@@ -13,6 +15,40 @@ class MockProviderAdapter(ProviderAdapter):
     def __init__(self) -> None:
         self.preset_responses: dict[str, str] = {}
         self.call_history: list[list[LLMMessage]] = []
+        self.preset_credential_status: CredentialStatus = CredentialStatus.VALID
+        self.preset_error_message: str | None = None
+        self.preset_identity: IdentityInfo | None = IdentityInfo(
+            principal_name="mock-user",
+            principal_type="account",
+            organization="mock-org",
+            project="local-dev",
+            quota_scope="local-dev",
+        )
+        self.preset_discovered_models: list[DiscoveredModel] = [
+            DiscoveredModel(
+                model_id="mock-mya",
+                provider="mock",
+                raw_capabilities=["code_generation", "tool_use", "structured_output"],
+            ),
+            DiscoveredModel(
+                model_id="mock-fast",
+                provider="mock",
+                raw_capabilities=["code_generation"],
+            ),
+            DiscoveredModel(
+                model_id="mock-reasoning",
+                provider="mock",
+                raw_capabilities=["reasoning", "structured_output"],
+            ),
+        ]
+
+    def validate_credential(self) -> tuple[CredentialStatus, str | None, IdentityInfo | None]:
+        return self.preset_credential_status, self.preset_error_message, self.preset_identity
+
+    def discover_models(self) -> list[DiscoveredModel]:
+        if self.preset_credential_status != CredentialStatus.VALID:
+            return []
+        return list(self.preset_discovered_models)
 
     def set_response(self, prompt_keyword: str, response: str) -> None:
         self.preset_responses[prompt_keyword] = response

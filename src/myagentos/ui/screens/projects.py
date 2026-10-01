@@ -263,9 +263,7 @@ class ProjectsScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="top_bar"):
-            yield Label(
-                f"[bold {Colors.PRIMARY}]MYA · PROJECT EXPLORER[/bold {Colors.PRIMARY}]"
-            )
+            yield Label(f"[bold {Colors.PRIMARY}]MYA · PROJECT EXPLORER[/bold {Colors.PRIMARY}]")
             yield Label(
                 f"[{Colors.DIM}][N] New Project  [A] Add Project  "
                 f"[T] Toggle Trash  [R] Refresh  [Esc/Q] Back to Mya[/{Colors.DIM}]"
@@ -409,9 +407,7 @@ class ProjectsScreen(Screen[None]):
                 status_color = "green" if proj.state.value == "active" else "yellow"
                 active_badge = " [bold green]◄ CURRENT[/bold green]" if is_current else ""
                 elements = [
-                    Label(
-                        f"[bold {status_color}]● {proj.name}[/bold {status_color}]{active_badge}"
-                    )
+                    Label(f"[bold {status_color}]● {proj.name}[/bold {status_color}]{active_badge}")
                 ]
                 if tags:
                     elements.append(Label(f"  [magenta]{tags}[/magenta]"))

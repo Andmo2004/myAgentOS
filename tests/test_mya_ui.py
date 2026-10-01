@@ -268,4 +268,31 @@ async def test_mya_app_key_and_model_commands(
         assert "MYA_MODEL=claude-3-5-haiku-latest" in env_content_haiku
 
 
+@pytest.mark.asyncio
+async def test_mya_app_ctrl_d_quits_from_prompt() -> None:
+    """AC: Ctrl+D exits the application even when PromptInput is focused."""
+    app = MyaApp(check_first_run=False)
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#prompt-input", Input)
+        assert pilot.app.focused == inp
+        assert pilot.app.is_running is True
+
+        await pilot.press("ctrl+d")
+        assert pilot.app.is_running is False
+
+
+@pytest.mark.asyncio
+async def test_mya_app_ctrl_d_quits_with_prompt_text() -> None:
+    """AC: Ctrl+D exits the application when text is present in PromptInput."""
+    app = MyaApp(check_first_run=False)
+    async with app.run_test() as pilot:
+        inp = pilot.app.query_one("#prompt-input", Input)
+        inp.value = "draft message"
+        assert pilot.app.is_running is True
+
+        await pilot.press("ctrl+d")
+        assert pilot.app.is_running is False
+
+
+
 

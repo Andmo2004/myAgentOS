@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 from myagentos.core.errors import MyAgentOSError
 from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
+from myagentos.gateway.credentials import CredentialStatus, IdentityInfo
+from myagentos.gateway.discovery import DiscoveredModel
 
 
 class OpenAIAdapter(ProviderAdapter):
@@ -24,6 +26,60 @@ class OpenAIAdapter(ProviderAdapter):
             raise MyAgentOSError("OPENAI_API_KEY is not set. Cannot invoke OpenAIAdapter.")
         self._client = OpenAI(api_key=self.api_key)
         return self._client
+
+    def validate_credential(self) -> tuple[CredentialStatus, str | None, IdentityInfo | None]:
+        """Validates credential using lowest-privilege models.list() call (§6, §26)."""
+        if not self.api_key:
+            return CredentialStatus.INVALID, "OPENAI_API_KEY no está configurada", None
+        try:
+            client = self._get_client()
+            # Fetch single page or first item with fast timeout
+            _ = client.models.list(timeout=5.0)
+            org = getattr(client, "organization", None)
+            proj = getattr(client, "project", None)
+            identity = IdentityInfo(
+                principal_name="api_user",
+                principal_type="api_key",
+                organization=org or None,
+                project=proj or None,
+                quota_scope=proj or org or None,
+            ) if (org or proj) else None
+            return CredentialStatus.VALID, None, identity
+        except Exception as e:
+            err_str = str(e).lower()
+            if "401" in err_str or "invalid" in err_str or "unauthorized" in err_str:
+                return CredentialStatus.INVALID, "La API key no es válida o fue revocada", None
+            if "403" in err_str or "permission" in err_str:
+                return CredentialStatus.INSUFFICIENT_SCOPE, "La API key no tiene permisos suficientes", None
+            if "429" in err_str or "rate limit" in err_str:
+                return CredentialStatus.RATE_LIMITED, "Límite de peticiones alcanzado", None
+            return CredentialStatus.PROVIDER_UNAVAILABLE, "Proveedor no disponible o sin conexión", None
+
+    def discover_models(self) -> list[DiscoveredModel]:
+        """Discovers accessible models from OpenAI (§8)."""
+        if not self.api_key:
+            return []
+        try:
+            client = self._get_client()
+            models_page = client.models.list(timeout=10.0)
+            discovered: list[DiscoveredModel] = []
+            for m in models_page:
+                raw_caps = ["code_generation"]
+                if "gpt" in m.id or "o1" in m.id or "o3" in m.id:
+                    raw_caps.append("tool_use")
+                    raw_caps.append("structured_output")
+                discovered.append(
+                    DiscoveredModel(
+                        model_id=m.id,
+                        provider="openai",
+                        created_at=getattr(m, "created", None),
+                        owned_by=getattr(m, "owned_by", None),
+                        raw_capabilities=raw_caps,
+                    )
+                )
+            return discovered
+        except Exception:
+            return []
 
     def generate(
         self,

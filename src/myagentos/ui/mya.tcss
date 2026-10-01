@@ -1,0 +1,148 @@
+/* Estilos de Mya TUI v2.
+   Los colores dinámicos salen del tema activo (mya_theme.py).
+   $primary cambia con el proveedor activo; $p-<id> es fijo por proveedor. */
+
+Screen {
+    layout: vertical;
+    background: $background;
+}
+
+#body, #conversation {
+    height: 1fr;
+    padding: 1 3;
+    scrollbar-size-vertical: 1;
+    scrollbar-background: $background;
+    scrollbar-color: $mya-line;
+    scrollbar-color-hover: $primary;
+    scrollbar-color-active: $primary;
+}
+
+Welcome, WelcomePanel {
+    height: auto;
+    margin-bottom: 1;
+}
+
+/* Conversación: la barra lateral identifica quién habla, sin etiquetas. */
+MessageBlock, .chat-message {
+    height: auto;
+    margin-bottom: 1;
+    padding: 0 2;
+    border-left: outer $mya-line;
+}
+
+MessageBlock.user, .chat-message.-user {
+    border-left: outer $secondary;
+}
+
+MessageBlock.agent, .chat-message.-mya, .chat-message.-agent {
+    border-left: outer $primary;
+}
+
+MessageBlock.tool, .chat-message.-system, .chat-message.-tool {
+    border-left: outer $mya-line;
+    color: $mya-muted;
+    background: $surface;
+}
+
+.chat-message.-error {
+    border-left: outer $error;
+    background: $surface;
+}
+
+.chat-header {
+    display: none;
+}
+
+/* Cada respuesta conserva el color del modelo que la generó */
+MessageBlock.agent.p-mya, .chat-message.-mya.p-mya, .chat-message.-agent.p-mya, .chat-message.p-mya       { border-left: outer $p-mya; }
+MessageBlock.agent.p-mock, .chat-message.-mya.p-mock, .chat-message.-agent.p-mock, .chat-message.p-mock     { border-left: outer $p-mock; }
+MessageBlock.agent.p-claude, .chat-message.-mya.p-claude, .chat-message.-agent.p-claude, .chat-message.p-claude { border-left: outer $p-claude; }
+MessageBlock.agent.p-openai, .chat-message.-mya.p-openai, .chat-message.-agent.p-openai, .chat-message.p-openai { border-left: outer $p-openai; }
+MessageBlock.agent.p-gemini, .chat-message.-mya.p-gemini, .chat-message.-agent.p-gemini, .chat-message.p-gemini { border-left: outer $p-gemini; }
+
+Thinking, ThinkingIndicator {
+    height: 1;
+    padding: 0 2;
+    margin-bottom: 1;
+}
+
+/* Pie: prompt sin caja + barra de estado */
+#footer, #bottom-dock {
+    dock: bottom;
+    height: auto;
+    background: $background;
+}
+
+#suggestions {
+    display: none;
+    height: auto;
+    max-height: 12;
+    margin: 0 3;
+    padding: 0 1;
+    border: round $primary 50%;
+    background: $surface;
+}
+
+#suggestions > .option-list--option-highlighted {
+    background: $primary 25%;
+    text-style: none;
+}
+
+#prompt-row, #prompt-container {
+    height: 3;
+    padding: 0 3;
+    border-top: hkey $mya-line;
+    background: transparent;
+}
+
+#prompt-row:focus-within, #prompt-container:focus-within {
+    border-top: hkey $primary;
+}
+
+#prompt-glyph, #prompt-label {
+    width: 2;
+    height: 3;
+    content-align: left top;
+    color: $primary;
+    text-style: bold;
+}
+
+#prompt, #prompt-input {
+    width: 1fr;
+    height: 3;
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+#prompt:focus, #prompt-input:focus {
+    border: none;
+    background: transparent;
+}
+
+#prompt > .input--placeholder, #prompt-input > .input--placeholder {
+    color: $mya-muted;
+}
+
+StatusLine, #status-bar {
+    height: 1;
+    padding: 0 3;
+    background: $background;
+}
+
+#status-left {
+    width: 1fr;
+}
+
+#status-right {
+    width: auto;
+}
+
+/* ── Densidad visual ──────────────────────────────────────────────────────── */
+Screen.-compact MessageBlock, Screen.-compact .chat-message {
+    margin-bottom: 0;
+}
+
+Screen.-compact Welcome, Screen.-compact WelcomePanel {
+    margin-bottom: 0;
+}

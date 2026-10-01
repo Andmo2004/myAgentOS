@@ -19,7 +19,7 @@ from myagentos.ui.theme import (
 )
 
 
-# Status icons — must work without color
+# Status icons — clean, character-driven glyphs
 class Icons:
     PASS = "✓"
     FAIL = "✗"
@@ -27,20 +27,46 @@ class Icons:
     RUNNING = "●"
     PENDING = "○"
     ARROW = "›"
-    PROMPT = "mya ›"
+    PROMPT = "❯"
     SEPARATOR = "─"
+    BRAND = "◆"
+    BRANCH = "⎇"
+    DOT = "·"
+    BAR = "▎"
 
 
-# Color palette for Rich markup
+from myagentos.ui.theme.mya_theme import (
+    INK,
+    LINE,
+    MUTED as MYA_MUTED,
+    PANEL,
+    RED,
+    SAGE,
+    SAND,
+    SURFACE,
+    TEXT,
+)
+
+
+# Color palette for Rich markup (Truecolor Mya v2 Palette)
 class Colors:
-    PRIMARY = "cyan"
-    SUCCESS = "green"
-    WARNING = "yellow"
-    ERROR = "red"
-    DIM = "dim"
-    ACCENT = "magenta"
-    INFO = "blue"
-    MUTED = "dim white"
+    PRIMARY = "#D97BB6"
+    SECONDARY = SAND
+    SUCCESS = SAGE
+    WARNING = SAND
+    ERROR = RED
+    DIM = MYA_MUTED
+    ACCENT = SAND
+    INFO = "#5B9DF9"
+    MUTED = MYA_MUTED
+
+
+COST_COLORS: dict[str, str] = {
+    "low": Colors.SUCCESS,
+    "medium": Colors.WARNING,
+    "high": "#E2804F",
+    "max": Colors.ERROR,
+}
 
 
 # Risk level colors
@@ -52,6 +78,7 @@ RISK_COLORS: dict[str, str] = {
 }
 
 __all__ = [
+    "COST_COLORS",
     "Colors",
     "CostTier",
     "DEFAULT_THEME",
