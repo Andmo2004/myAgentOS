@@ -46,6 +46,7 @@ class SlashCommandKind(StrEnum):
     KEY = "key"
     MODEL = "model"
     CATEGORIZE = "categorize"
+    INIT = "init"
 
     # Appearance
     THEME = "theme"
@@ -100,6 +101,7 @@ _SLASH_MAP: dict[str, SlashCommandKind] = {
     "/keys": SlashCommandKind.KEY,
     "/model": SlashCommandKind.MODEL,
     "/categorize": SlashCommandKind.CATEGORIZE,
+    "/init": SlashCommandKind.INIT,
     # Appearance
     "/theme": SlashCommandKind.THEME,
     "/motion": SlashCommandKind.MOTION,

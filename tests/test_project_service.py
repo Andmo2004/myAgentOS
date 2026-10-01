@@ -187,3 +187,45 @@ def test_project_mya_environment_creation_and_non_overwriting(tmp_path: Path) ->
     # Other missing directories were still created
     assert (custom_dir / ".mya" / "skills").is_dir()
     assert (custom_dir / ".myagentos" / "memory").is_dir()
+
+
+def test_reset_project_mya_environment_creates_backup(tmp_path: Path):
+    """Resetting project Mya environment creates backup of MYA.md and recreates fresh files."""
+    repo_dir = tmp_path / "reset-repo"
+    repo_dir.mkdir()
+
+    # Step 1: Initial ensure
+    res = ProjectManagerService.ensure_project_mya_environment(
+        project_root=repo_dir,
+        project_name="Reset Repo",
+    )
+    assert res["status"] == "ok"
+    assert "MYA.md" in res["created"]
+    assert (repo_dir / "MYA.md").is_file()
+    assert (repo_dir / ".mya" / "skills").is_dir()
+    assert (repo_dir / ".myagentos" / "memory").is_dir()
+
+    # Step 2: Modify MYA.md with user edits
+    mya_file = repo_dir / "MYA.md"
+    mya_file.write_text("# Custom User Rules\n- User rule 1\n", encoding="utf-8")
+
+    # Step 3: Run reset
+    reset_res = ProjectManagerService.reset_project_mya_environment(
+        project_root=repo_dir,
+        project_name="Reset Repo",
+    )
+    assert reset_res["status"] == "ok"
+    assert reset_res.get("reset") is True
+    assert reset_res.get("backup") == "MYA.md.bak"
+
+    # Backup file exists and has previous user edits
+    backup_file = repo_dir / "MYA.md.bak"
+    assert backup_file.is_file()
+    assert "User rule 1" in backup_file.read_text(encoding="utf-8")
+
+    # New MYA.md was regenerated with clean default structure
+    new_mya = repo_dir / "MYA.md"
+    assert new_mya.is_file()
+    assert "Reset Repo" in new_mya.read_text(encoding="utf-8")
+    assert "## Rules" in new_mya.read_text(encoding="utf-8")
+

@@ -231,6 +231,16 @@ _BUILTIN_COMMANDS: list[CommandDefinition] = [
         supports_arguments=False,
         handler="ui.categorize",
     ),
+    CommandDefinition(
+        name="init",
+        version="1.0.0",
+        category=CommandCategory.CONFIGURATION,
+        description="Inicializar o resetear estructura y memoria de Mya en el proyecto (MYA.md, skills, notas)",
+        expected_cost=ExpectedCost.LOW,
+        args="[reset|force]",
+        supports_arguments=True,
+        handler="ui.init",
+    ),
     # ── 5. Appearance ───────────────────────────────────────────────
     CommandDefinition(
         name="theme",

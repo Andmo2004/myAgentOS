@@ -311,26 +311,35 @@ class ProjectManagerService:
         except OSError:
             pass
 
-        # 4. Check & create canonical notes/vault directories if project_id is available
-        if project_id:
-            safe_p_id = re.sub(r"[^a-zA-Z0-9_-]", "_", project_id)
-            notes_dir = root / ".myagentos" / "memory" / "projects" / safe_p_id / "notes"
-            checked_items.append(f".myagentos/memory/projects/{safe_p_id}/notes")
-            if not notes_dir.is_dir():
-                try:
-                    notes_dir.mkdir(parents=True, exist_ok=True)
-                    created_items.append(f".myagentos/memory/projects/{safe_p_id}/notes")
-                except OSError as exc:
-                    logger.warning("Could not create notes dir in %s: %s", root, exc)
+        # 4. Check & create canonical notes/vault directories
+        target_id = project_id
+        if not target_id:
+            try:
+                reg_proj = ProjectRegistry().get_by_path(root)
+                if reg_proj:
+                    target_id = reg_proj.project_id
+            except Exception:
+                pass
+        target_id = target_id or root.name
+        safe_p_id = re.sub(r"[^a-zA-Z0-9_-]", "_", target_id)
 
-            vault_dir = root / ".myagentos" / "vault" / "projects" / safe_p_id
-            checked_items.append(f".myagentos/vault/projects/{safe_p_id}")
-            if not vault_dir.is_dir():
-                try:
-                    vault_dir.mkdir(parents=True, exist_ok=True)
-                    created_items.append(f".myagentos/vault/projects/{safe_p_id}")
-                except OSError as exc:
-                    logger.warning("Could not create vault dir in %s: %s", root, exc)
+        notes_dir = root / ".myagentos" / "memory" / "projects" / safe_p_id / "notes"
+        checked_items.append(f".myagentos/memory/projects/{safe_p_id}/notes")
+        if not notes_dir.is_dir():
+            try:
+                notes_dir.mkdir(parents=True, exist_ok=True)
+                created_items.append(f".myagentos/memory/projects/{safe_p_id}/notes")
+            except OSError as exc:
+                logger.warning("Could not create notes dir in %s: %s", root, exc)
+
+        vault_dir = root / ".myagentos" / "vault" / "projects" / safe_p_id
+        checked_items.append(f".myagentos/vault/projects/{safe_p_id}")
+        if not vault_dir.is_dir():
+            try:
+                vault_dir.mkdir(parents=True, exist_ok=True)
+                created_items.append(f".myagentos/vault/projects/{safe_p_id}")
+            except OSError as exc:
+                logger.warning("Could not create vault dir in %s: %s", root, exc)
 
         return {
             "status": "ok",
@@ -338,6 +347,45 @@ class ProjectManagerService:
             "checked": checked_items,
             "created": created_items,
         }
+
+    @classmethod
+    def reset_project_mya_environment(
+        cls,
+        project_root: Path | str,
+        project_name: str | None = None,
+        project_id: str | None = None,
+        profile: Any = None,
+    ) -> dict[str, Any]:
+        """Reset and recreate project-local files and directories required for Mya.
+
+        If MYA.md exists, creates a backup (MYA.md.bak) before regenerating a clean starter MYA.md.
+        Ensures .mya/skills/ (and README.md), .myagentos/memory/, and vault/notes directories exist.
+        """
+        root = Path(project_root).resolve()
+        if not root.is_dir():
+            return {"status": "error", "reason": f"Path is not a directory: {root}"}
+
+        mya_file = root / "MYA.md"
+        backup_created: str | None = None
+        if mya_file.is_file():
+            backup_path = root / "MYA.md.bak"
+            try:
+                backup_path.write_bytes(mya_file.read_bytes())
+                backup_created = str(backup_path.name)
+                mya_file.unlink()
+            except OSError as exc:
+                logger.warning("Could not backup existing MYA.md in %s: %s", root, exc)
+
+        result = cls.ensure_project_mya_environment(
+            project_root=root,
+            project_name=project_name,
+            project_id=project_id,
+            profile=profile,
+        )
+        if backup_created:
+            result["backup"] = backup_created
+            result["reset"] = True
+        return result
 
     @classmethod
     def _initialize_project_memory(

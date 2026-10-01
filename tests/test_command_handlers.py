@@ -85,3 +85,33 @@ async def test_skills_command_renders_catalog_and_search():
         app._fill_prompt("/skills show cybersecurity")
         await pilot.press("enter")
         await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_init_command_creates_and_resets_environment():
+    temp_dir = Path(tempfile.mkdtemp())
+    app = MyaApp(repo_path=temp_dir)
+    async with app.run_test(size=(80, 24)) as pilot:
+        inp = pilot.app.query_one("#prompt-input", Input)
+
+        # 1. Run /init to create project Mya environment
+        app._fill_prompt("/init")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert (temp_dir / "MYA.md").is_file()
+        assert (temp_dir / ".mya" / "skills").is_dir()
+        assert (temp_dir / ".myagentos" / "memory").is_dir()
+
+        # 2. Modify MYA.md
+        (temp_dir / "MYA.md").write_text("# Custom rules\n- Rule 42\n", encoding="utf-8")
+
+        # 3. Run /init reset to reset and backup
+        app._fill_prompt("/init reset")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert (temp_dir / "MYA.md.bak").is_file()
+        assert "Rule 42" in (temp_dir / "MYA.md.bak").read_text(encoding="utf-8")
+        assert "## Rules" in (temp_dir / "MYA.md").read_text(encoding="utf-8")
+

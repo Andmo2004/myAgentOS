@@ -99,3 +99,29 @@ def test_cli_project_json_and_filter(capsys, project_service, tmp_path: Path, mo
     search_out = capsys.readouterr().out
     assert "Active Projects (0)" in search_out
 
+
+def test_cli_project_init_and_reset(capsys, project_service, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("myagentos.cli.ProjectManagerService", lambda: project_service)
+    target = tmp_path / "cli-init-repo"
+    target.mkdir()
+
+    # 1. CLI init action
+    cmd_project(action="init", target=str(target), name="CLI Init")
+    init_out = capsys.readouterr().out
+    assert "Estructura de Mya verificada" in init_out
+    assert (target / "MYA.md").is_file()
+    assert (target / ".mya" / "skills").is_dir()
+
+    # Edit MYA.md
+    (target / "MYA.md").write_text("# Custom\n- CLI test edit\n", encoding="utf-8")
+
+    # 2. CLI reset action
+    cmd_project(action="reset", target=str(target), name="CLI Init")
+    reset_out = capsys.readouterr().out
+    assert "Estructura de Mya reinicializada" in reset_out
+    assert "Backup de MYA.md" in reset_out
+    assert (target / "MYA.md.bak").is_file()
+    assert "CLI test edit" in (target / "MYA.md.bak").read_text(encoding="utf-8")
+    assert "## Rules" in (target / "MYA.md").read_text(encoding="utf-8")
+
+

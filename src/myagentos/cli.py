@@ -545,6 +545,29 @@ def cmd_project(
             sys.exit(1)
         return
 
+    if action in ("init", "reset"):
+        target_path = Path(target or repo_path).resolve()
+        is_reset = action == "reset" or force
+        if is_reset:
+            res = mgr.reset_project_mya_environment(target_path, project_name=name)
+        else:
+            res = mgr.ensure_project_mya_environment(target_path, project_name=name)
+
+        if res.get("status") == "error":
+            console.print(f"[bold red]✗ Failed to initialize project:[/bold red] {res.get('reason')}")
+            sys.exit(1)
+
+        action_desc = "reinicializada" if is_reset else "verificada"
+        console.print(f"[bold green]✓ Estructura de Mya {action_desc}:[/bold green] {target_path}")
+        if res.get("backup"):
+            console.print(f"  [yellow]Backup de MYA.md:[/yellow] {res['backup']}")
+        if res.get("created"):
+            for it in res["created"]:
+                console.print(f"  [green]+[/green] {it}")
+        else:
+            console.print("  [cyan]Todos los ficheros y directorios ya existían.[/cyan]")
+        return
+
     if action == "new":
         if not target:
             console.print(
@@ -763,6 +786,28 @@ def cmd_mya(
             console.print(
                 f"[bold red]Error:[/bold red] Unknown mode '{argument}'. Valid: {', '.join(valid)}"
             )
+    elif cmd in ("/init", "/reset"):
+        from myagentos.projects.service import ProjectManagerService
+
+        root = Path(repo_path).resolve()
+        is_reset = cmd == "/reset" or argument.strip().lower() in ("reset", "force", "--reset", "--force")
+        if is_reset:
+            res = ProjectManagerService.reset_project_mya_environment(root)
+        else:
+            res = ProjectManagerService.ensure_project_mya_environment(root)
+
+        if res.get("status") == "error":
+            console.print(f"[bold red]Error:[/bold red] {res.get('reason')}")
+        else:
+            action_desc = "reinicializada" if is_reset else "verificada"
+            console.print(f"[bold green]✓ Estructura de Mya {action_desc} en {root}[/bold green]")
+            if res.get("backup"):
+                console.print(f"  [yellow]Backup de MYA.md:[/yellow] {res['backup']}")
+            if res.get("created"):
+                for it in res["created"]:
+                    console.print(f"  [green]+[/green] {it}")
+            else:
+                console.print("  [cyan]Todos los ficheros y directorios ya existían.[/cyan]")
     else:
         from myagentos.mya.agent import MyaAgent
 
@@ -945,8 +990,18 @@ def main() -> None:
     p_proj.add_argument(
         "action",
         nargs="?",
-        default="list",
-        choices=["list", "add", "new", "clone", "trash", "categorize", "profile", "tags"],
+        choices=[
+            "list",
+            "add",
+            "new",
+            "clone",
+            "trash",
+            "categorize",
+            "profile",
+            "tags",
+            "init",
+            "reset",
+        ],
         help="Action to execute (default: list)",
     )
     p_proj.add_argument(

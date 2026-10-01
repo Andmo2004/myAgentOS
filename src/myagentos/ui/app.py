@@ -638,6 +638,9 @@ class MyaApp(App[None]):
                 ]
                 self._append_mya_message("\n".join(summary_lines))
 
+            case SlashCommandKind.INIT:
+                await self._handle_init_command(cmd.argument)
+
             case SlashCommandKind.PROJECTS:
                 self.action_open_projects()
 
@@ -1388,6 +1391,71 @@ class MyaApp(App[None]):
             self._append_mya_message(
                 f"{badge} Subcomando no reconocido. Uso: /skills | /skills search <query> | /skills show <skill>"
             )
+
+    async def _handle_init_command(self, argument: str) -> None:
+        """Handle /init command to add or reset Mya project structure and memory files."""
+        badge = format_command_badge("/init")
+        repo_root = getattr(self.session, "repo_root", None)
+        if not repo_root or not Path(repo_root).is_dir():
+            self._append_mya_message(
+                f"{badge} [bold red]No hay un proyecto activo o directorio de repositorio asociado a la sesión actual.[/bold red]"
+            )
+            return
+
+        from myagentos.projects.service import ProjectManagerService
+
+        root = Path(repo_root).resolve()
+        arg = argument.strip().lower()
+        is_reset = arg in ("reset", "force", "--reset", "--force")
+
+        proj_name = getattr(self.session, "repository", None) or root.name
+        proj_id = getattr(self.session, "project_id", None)
+        profile = getattr(self.session, "project_profile", None)
+
+        if is_reset:
+            result = ProjectManagerService.reset_project_mya_environment(
+                project_root=root,
+                project_name=proj_name,
+                project_id=proj_id,
+                profile=profile,
+            )
+        else:
+            result = ProjectManagerService.ensure_project_mya_environment(
+                project_root=root,
+                project_name=proj_name,
+                project_id=proj_id,
+                profile=profile,
+            )
+
+        if result.get("status") == "error":
+            self._append_mya_message(
+                f"{badge} [bold red]Error al inicializar proyecto:[/bold red] {result.get('reason')}"
+            )
+            return
+
+        created = result.get("created", [])
+        checked = result.get("checked", [])
+        backup = result.get("backup")
+
+        lines = [
+            f"{badge} [bold]{'REINICIALIZACIÓN / RESET' if is_reset else 'ESTRUCTURA DE PROYECTO MYA'}[/bold]",
+            f"  Directorio: [dim]{root}[/dim]",
+        ]
+        if backup:
+            lines.append(f"  [yellow]• Backup de MYA.md:[/yellow] [bold]{backup}[/bold]")
+
+        if created:
+            lines.append(f"  [green]• Elementos creados ({len(created)}):[/green]")
+            for item in created:
+                lines.append(f"    [green]+[/green] {item}")
+        else:
+            lines.append("  [cyan]• Todos los directorios y archivos requeridos ya estaban presentes.[/cyan]")
+
+        lines.append(f"  [dim]• Elementos verificados ({len(checked)}): {', '.join(checked)}[/dim]")
+        if not is_reset:
+            lines.append("\n[dim]Nota: Usa [bold]/init reset[/bold] para regenerar MYA.md con respaldo automático.[/dim]")
+
+        self._append_mya_message("\n".join(lines))
 
     async def _handle_natural_input(self, text: str) -> None:
         """Handle conversational or task intent input from the user."""
