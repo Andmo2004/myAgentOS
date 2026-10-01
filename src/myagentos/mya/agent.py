@@ -36,11 +36,15 @@ from myagentos.memory.models import MemoryContext
 from myagentos.mya.context import ConversationContext, ConversationContextService
 from myagentos.mya.dialogue import Question, QuestionBatch
 from myagentos.mya.explanations import translate_state
+from myagentos.mya.instructions import MyaInstructionLoader, MyaInstructions
 from myagentos.mya.intent import IntentMode, InterpretResult, UserIntent
 from myagentos.mya.prompts import (
     MYA_CONVERSE_PROMPT,
     MYA_INTERPRET_PROMPT,
 )
+from myagentos.skills.models import ActiveSkill, ActiveSkillContext
+from myagentos.skills.registry import SkillRegistry
+from myagentos.skills.retriever import SkillRetriever
 from myagentos.ui.session import Session
 
 logger = logging.getLogger(__name__)
@@ -82,6 +86,8 @@ class MyaAgent:
         event_store: EventStore | None = None,
         conversation_context_service: ConversationContextService | None = None,
         memory_manager: SharedMemoryManager | None = None,
+        skill_registry: SkillRegistry | None = None,
+        skill_retriever: SkillRetriever | None = None,
     ) -> None:
         self.gateway = gateway
         self.model_id = model_id
@@ -89,6 +95,10 @@ class MyaAgent:
         self.conversation_context_service = (
             conversation_context_service or ConversationContextService()
         )
+        self.skill_registry = skill_registry or SkillRegistry()
+        self.skill_retriever = skill_retriever or SkillRetriever(self.skill_registry)
+        self.last_active_skills: tuple[ActiveSkill, ...] = ()
+        self.last_instructions: MyaInstructions | None = None
         self._test_memory_dir: tempfile.TemporaryDirectory[str] | None = None
         if memory_manager is None:
             from myagentos.config.paths import resolve_mya_home
@@ -121,6 +131,10 @@ class MyaAgent:
                 context_parts.append(f"Branch: {session.branch}")
             if session.commit_short:
                 context_parts.append(f"Commit: {session.commit_short}")
+            if session.repo_root:
+                mya_inst = MyaInstructionLoader.load_for_project(session.repo_root)
+                if mya_inst and mya_inst.has_content:
+                    context_parts.append(f"Project Rules: {mya_inst.content[:200]}")
         context_str = " | ".join(context_parts)
         user_message_content = (
             f"Context: {context_str}\nUser request: {clean_input}"
@@ -202,16 +216,52 @@ class MyaAgent:
         if not clean_input:
             return "Aquí estoy. Dime qué tienes en mente."
 
+        # 1. Discover skills (built-in + user + project if session has repo_root)
+        project_root = session.repo_root if session else None
+        if project_root:
+            self.skill_registry.discover(project_root=project_root)
+        else:
+            self.skill_registry.discover()
+
+        # 2. Hierarchically load MYA.md project instructions (§19, §20, §21)
+        mya_instructions = MyaInstructionLoader.load_for_project(project_root)
+        mya_instructions_content = mya_instructions.content if mya_instructions else None
+
+        # 3. Retrieve relevant skills JIT and resolve dependency tree (§15, §16, §23)
+        session_profile = session.project_profile if session else None
+        selected_skills = self.skill_retriever.select(
+            query=clean_input,
+            project_profile=session_profile,
+            mya_instructions=mya_instructions_content,
+            limit=3,
+        )
+        active_skill_context = self.skill_retriever.activate(selected_skills)
+        self.last_active_skills = active_skill_context.skills
+        self.last_instructions = mya_instructions
+
+        # 4. Build factual session context
         context = self.conversation_context_service.build_context(session, clean_input)
+
+        # 5. Build memory context (§20, §23)
         memory_context = self.memory_manager.build_context(
             session=session,
             query=clean_input,
             base_context=context.to_prompt(),
             history=history,
         )
+
+        # 6. Compose unified prompt package with clearly labeled sections (§23, §24, §25)
+        context_blocks: list[str] = []
+        if mya_instructions and mya_instructions.has_content:
+            context_blocks.append(mya_instructions.to_prompt_section())
+        if active_skill_context.formatted:
+            context_blocks.append(active_skill_context.formatted)
+        context_blocks.append(memory_context.formatted)
+        unified_system_context = "\n\n".join(context_blocks)
+
         messages = [
             LLMMessage(role="system", content=MYA_CONVERSE_PROMPT),
-            LLMMessage(role="system", content=memory_context.formatted),
+            LLMMessage(role="system", content=unified_system_context),
         ]
         if history and session is None:
             messages.extend(
@@ -462,6 +512,17 @@ class MyaAgent:
                 ]
                 if matching:
                     return f"Según la memoria {scope_label}: {matching[0].content}"
+
+        if "skill" in lower or "capacidades" in lower:
+            if self.last_active_skills:
+                skills_str = ", ".join(f"#{s.name}" for s in self.last_active_skills)
+                return f"Skills activadas para esta consulta: {skills_str}."
+            return "No hay skills especializadas activas para esta consulta."
+
+        if any(term in lower for term in ("mya.md", "reglas del proyecto", "instrucciones del proyecto")):
+            if self.last_instructions and self.last_instructions.has_content:
+                return f"Instrucciones de MYA.md:\n{self.last_instructions.content}"
+            return "No hay archivo MYA.md con instrucciones registrado en el proyecto."
 
         if any(
             term in lower

@@ -1,6 +1,10 @@
 """Policy Engine: central deterministic authority for risk and capability tokens (§3, §5, §23)."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
+
+from typing import TYPE_CHECKING
 
 from myagentos.core.models.data_policy import TrustTag
 from myagentos.core.models.patch import PatchSet
@@ -9,8 +13,9 @@ from myagentos.core.models.risk import RiskAssessment, RiskLevel, RiskPhase
 from myagentos.core.models.token import CapabilityToken, NetworkScope, TokenLimits
 from myagentos.policy.signals import DEFAULT_PROTECTED_PATHS, detect_risk_signals
 from myagentos.policy.validator import validate_patch_set
-from myagentos.skills.enforcer import SkillPermissionEnforcer
-from myagentos.skills.models import SkillManifest
+
+if TYPE_CHECKING:
+    from myagentos.skills.models import SkillManifest
 
 
 class PolicyEngine:
@@ -90,6 +95,8 @@ class PolicyEngine:
             RiskLevel.HIGH: TokenLimits(max_files=10, max_diff_lines=500, max_steps=20),
             RiskLevel.CRITICAL: TokenLimits(max_files=5, max_diff_lines=200, max_steps=10),
         }
+
+        from myagentos.skills.enforcer import SkillPermissionEnforcer
 
         # Monotonically elevate risk if any active skill requires higher minimum risk (§20, AUD-027)
         effective_risk = (

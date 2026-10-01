@@ -11,8 +11,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CommandCategory(StrEnum):
-    """Functional families of Mya Commands (§3)."""
+    """Functional families of Mya Commands (§3, §54)."""
 
+    NAVIGATION_SYSTEM = "navigation_system"
+    WORKFLOW = "workflow"
+    RESEARCH = "research"
+    CONFIGURATION = "configuration"
+    APPEARANCE = "appearance"
+
+    # Compatibility aliases
     UI_OBSERVABILITY = "ui_observability"
     WORKING_MODE = "working_mode"
     RESEARCH_ANALYSIS = "research_analysis"
@@ -22,26 +29,57 @@ class CommandCategory(StrEnum):
 # Category style specifications for terminal rendering
 # White text on category background pill
 CATEGORY_STYLES: dict[CommandCategory, dict[str, str]] = {
-    CommandCategory.UI_OBSERVABILITY: {
+    CommandCategory.NAVIGATION_SYSTEM: {
         "bg_color": "#2563EB",  # Rich Blue
+        "fg_color": "white",
+        "tag": "bold white on #2563EB",
+        "label": "Navegación y Sistema",
+    },
+    CommandCategory.WORKFLOW: {
+        "bg_color": "#059669",  # Emerald Green
+        "fg_color": "white",
+        "tag": "bold white on #059669",
+        "label": "Flujos de trabajo",
+    },
+    CommandCategory.RESEARCH: {
+        "bg_color": "#7C3AED",  # Purple / Violet
+        "fg_color": "white",
+        "tag": "bold white on #7C3AED",
+        "label": "Investigación",
+    },
+    CommandCategory.CONFIGURATION: {
+        "bg_color": "#0D9488",  # Teal
+        "fg_color": "white",
+        "tag": "bold white on #0D9488",
+        "label": "Configuración",
+    },
+    CommandCategory.APPEARANCE: {
+        "bg_color": "#D97706",  # Amber / Dark Orange
+        "fg_color": "white",
+        "tag": "bold white on #D97706",
+        "label": "Apariencia",
+    },
+    # Compatibility mappings
+    CommandCategory.UI_OBSERVABILITY: {
+        "bg_color": "#2563EB",
         "fg_color": "white",
         "tag": "bold white on #2563EB",
         "label": "UI / Observability",
     },
     CommandCategory.WORKING_MODE: {
-        "bg_color": "#059669",  # Emerald Green
+        "bg_color": "#059669",
         "fg_color": "white",
         "tag": "bold white on #059669",
         "label": "Working Mode",
     },
     CommandCategory.RESEARCH_ANALYSIS: {
-        "bg_color": "#7C3AED",  # Purple / Violet
+        "bg_color": "#7C3AED",
         "fg_color": "white",
         "tag": "bold white on #7C3AED",
         "label": "Research & Analysis",
     },
     CommandCategory.DECISION_EXPERTISE: {
-        "bg_color": "#D97706",  # Amber / Dark Orange
+        "bg_color": "#D97706",
         "fg_color": "white",
         "tag": "bold white on #D97706",
         "label": "Decision & Expertise",
@@ -84,7 +122,7 @@ class ExpectedCost(StrEnum):
 
 
 class CommandDefinition(BaseModel):
-    """Versioned schema and behavioral metadata of a Mya Command (§18)."""
+    """Versioned schema and behavioral metadata of a Mya Command (§18, §49)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -92,15 +130,35 @@ class CommandDefinition(BaseModel):
     version: str = "1.0.0"
     category: CommandCategory
     description: str
-    expected_cost: ExpectedCost
+    expected_cost: ExpectedCost = ExpectedCost.LOW
+    args: str = ""
     supports_arguments: bool = False
     routing_hint: str | None = None
     allowed_combinations: list[str] = Field(default_factory=list)
     forbidden_combinations: list[str] = Field(default_factory=list)
+    aliases: tuple[str, ...] = ()
+    hidden: bool = False
+    deprecated: bool = False
+    handler: str | None = None
 
     @property
     def slash_name(self) -> str:
         return f"/{self.name}"
+
+    @property
+    def cost(self) -> str:
+        """Returns string cost token ('low', 'medium', 'high', 'max') for catalog UI."""
+        match self.expected_cost:
+            case ExpectedCost.LOW:
+                return "low"
+            case ExpectedCost.MEDIUM:
+                return "medium"
+            case ExpectedCost.HIGH:
+                return "high"
+            case ExpectedCost.VERY_HIGH:
+                return "max"
+            case _:
+                return ""
 
     def format_badge(self) -> str:
         """Formats the command with white bold text on its category background color."""

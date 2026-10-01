@@ -110,3 +110,74 @@ class SkillManifest(BaseModel):
         }
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
+
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+from myagentos.core.errors import MyAgentOSError
+
+
+class SkillError(MyAgentOSError):
+    """Base exception for skill system operations."""
+
+
+class CircularDependencyError(SkillError):
+    """Raised when a circular dependency is detected in the skill graph (§17)."""
+
+
+class SkillDependencyDepthError(SkillError):
+    """Raised when skill dependency depth exceeds allowed threshold (§18)."""
+
+
+SkillSource = Literal["builtin", "user", "project"]
+
+
+@dataclass(frozen=True)
+class SkillDefinition:
+    """Lightweight definition of a skill loaded during discovery without full content (§14)."""
+
+    id: str
+    name: str
+    description: str
+    version: str
+    tags: tuple[str, ...]
+    triggers: tuple[str, ...]
+    source: SkillSource
+    path: Path
+    requires: tuple[str, ...] = ()
+    related: tuple[str, ...] = ()
+    risk_floor: str = "LOW"
+    protected_paths_add: tuple[str, ...] = ()
+    requires_network: bool = False
+    content_hash: str = ""
+
+    @property
+    def tag_set(self) -> set[str]:
+        return {t.lower().lstrip("#") for t in self.tags}
+
+    @property
+    def trigger_set(self) -> set[str]:
+        return {tr.lower() for tr in self.triggers}
+
+
+@dataclass(frozen=True)
+class ActiveSkill:
+    """Fully loaded skill with its procedural instructions, activated Just-in-Time (§16)."""
+
+    id: str
+    name: str
+    content: str
+    source: str
+    version: str = "1.0.0"
+    tags: tuple[str, ...] = ()
+    loaded_because: str = ""
+
+
+@dataclass(frozen=True)
+class ActiveSkillContext:
+    """Aggregated active skills payload ready for ContextBuilder injection (§16, §23)."""
+
+    skills: tuple[ActiveSkill, ...] = ()
+    formatted: str = ""
+

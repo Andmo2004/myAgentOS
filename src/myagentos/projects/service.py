@@ -7,6 +7,7 @@ docs/agentic-os-feature-project-manager-explorer.md.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import uuid
 from datetime import UTC, datetime
@@ -134,7 +135,12 @@ class ProjectManagerService:
         )
 
         self.registry.save_project(project)
-        self._initialize_project_memory(root)
+        self._initialize_project_memory(
+            project_root=root,
+            project_name=name,
+            project_id=p_id,
+            profile=profile,
+        )
         self._emit_event(
             project_id=p_id,
             event_name=EventName.PROJECT_CREATED,
@@ -184,7 +190,12 @@ class ProjectManagerService:
         )
 
         self.registry.save_project(project)
-        self._initialize_project_memory(root)
+        self._initialize_project_memory(
+            project_root=root,
+            project_name=proj_name,
+            project_id=p_id,
+            profile=profile,
+        )
         self._emit_event(
             project_id=p_id,
             event_name=EventName.PROJECT_ADDED,
@@ -192,16 +203,158 @@ class ProjectManagerService:
         )
         return project
 
-    @staticmethod
-    def _initialize_project_memory(project_root: Path) -> Path:
-        """Create the canonical, project-local memory root without touching legacy data."""
-        memory_root = project_root / ".myagentos" / "memory"
-        memory_root.mkdir(parents=True, exist_ok=True)
+    @classmethod
+    def ensure_project_mya_environment(
+        cls,
+        project_root: Path | str,
+        project_name: str | None = None,
+        project_id: str | None = None,
+        profile: Any = None,
+    ) -> dict[str, Any]:
+        """Verify and create project-local files and directories required for Mya.
+
+        Checks whether files and directories needed for Mya's operation already exist in the
+        project folder (not in Mya's global home directory):
+        - MYA.md (project instructions with rules, workflow, preferred skills)
+        - .mya/skills/ (project-local skills directory)
+        - .myagentos/memory/ (canonical project memory root)
+        - .myagentos/vault/projects/<project_id> (project vault/notes)
+        - .myagentos/memory/projects/<safe_project_id>/notes (canonical notes directory)
+
+        If an item already exists, it is NOT overwritten.
+        """
+        root = Path(project_root).resolve()
+        if not root.is_dir():
+            return {"status": "error", "reason": f"Path is not a directory: {root}"}
+
+        name = (project_name or root.name).strip()
+        created_items: list[str] = []
+        checked_items: list[str] = []
+
+        # 1. Check & create MYA.md in project root
+        mya_file = root / "MYA.md"
+        checked_items.append("MYA.md")
+        if not mya_file.is_file():
+            # Derive preferred skills from detected profile if available
+            preferred_skills: list[str] = ["#testing"]
+            if profile:
+                stack = getattr(profile, "stack", None)
+                langs = (
+                    [str(l).lower() for l in getattr(stack, "languages", [])] if stack else []
+                )
+                tags = [
+                    getattr(t, "label", str(t)).lower()
+                    for t in getattr(profile, "visible_tags", [])
+                ]
+                all_markers = set(langs + tags)
+                if any("python" in m for m in all_markers):
+                    preferred_skills.insert(0, "#python")
+                if any(
+                    m in ("javascript", "typescript", "node", "react", "vue") for m in all_markers
+                ):
+                    preferred_skills.insert(0, "#javascript")
+                if any(
+                    m in ("sql", "postgres", "sqlite", "database", "mysql") for m in all_markers
+                ):
+                    preferred_skills.append("#database")
+                if any(m in ("security", "auth", "oauth") for m in all_markers):
+                    preferred_skills.append("#cybersecurity")
+            if "#python" not in preferred_skills and "#javascript" not in preferred_skills:
+                preferred_skills.insert(0, "#python")
+
+            skills_block = "\n".join(f"- {s}" for s in preferred_skills)
+            starter_content = (
+                "# MYA.md\n\n"
+                f"## Project\n\n{name}\n\n"
+                "## Rules\n\n"
+                "- Keep changes minimal, safe, and well-tested.\n"
+                "- Never bypass project policy or security constraints.\n"
+                "- Review diffs before committing.\n\n"
+                "## Workflow\n\n"
+                "Inspect → Plan → Implement → Verify → Report.\n\n"
+                f"## Preferred Skills\n\n{skills_block}\n"
+            )
+            try:
+                mya_file.write_text(starter_content, encoding="utf-8")
+                created_items.append("MYA.md")
+            except OSError as exc:
+                logger.warning("Could not create MYA.md in %s: %s", root, exc)
+
+        # 2. Check & create project-local skills directory (.mya/skills)
+        skills_dir = root / ".mya" / "skills"
+        checked_items.append(".mya/skills")
+        if not skills_dir.is_dir():
+            try:
+                skills_dir.mkdir(parents=True, exist_ok=True)
+                created_items.append(".mya/skills")
+                readme_path = skills_dir / "README.md"
+                if not readme_path.exists():
+                    readme_path.write_text(
+                        "# Project Skills\n\n"
+                        "Place project-specific skills here. Each skill should be in its own directory with a `SKILL.md`.\n",
+                        encoding="utf-8",
+                    )
+            except OSError as exc:
+                logger.warning("Could not create skills dir in %s: %s", root, exc)
+
+        # 3. Check & create canonical project memory directory (.myagentos/memory)
+        memory_dir = root / ".myagentos" / "memory"
+        checked_items.append(".myagentos/memory")
+        if not memory_dir.is_dir():
+            try:
+                memory_dir.mkdir(parents=True, exist_ok=True)
+                created_items.append(".myagentos/memory")
+            except OSError as exc:
+                logger.warning("Could not create memory dir in %s: %s", root, exc)
         try:
-            memory_root.chmod(0o700)
+            memory_dir.chmod(0o700)
         except OSError:
             pass
-        return memory_root
+
+        # 4. Check & create canonical notes/vault directories if project_id is available
+        if project_id:
+            safe_p_id = re.sub(r"[^a-zA-Z0-9_-]", "_", project_id)
+            notes_dir = root / ".myagentos" / "memory" / "projects" / safe_p_id / "notes"
+            checked_items.append(f".myagentos/memory/projects/{safe_p_id}/notes")
+            if not notes_dir.is_dir():
+                try:
+                    notes_dir.mkdir(parents=True, exist_ok=True)
+                    created_items.append(f".myagentos/memory/projects/{safe_p_id}/notes")
+                except OSError as exc:
+                    logger.warning("Could not create notes dir in %s: %s", root, exc)
+
+            vault_dir = root / ".myagentos" / "vault" / "projects" / safe_p_id
+            checked_items.append(f".myagentos/vault/projects/{safe_p_id}")
+            if not vault_dir.is_dir():
+                try:
+                    vault_dir.mkdir(parents=True, exist_ok=True)
+                    created_items.append(f".myagentos/vault/projects/{safe_p_id}")
+                except OSError as exc:
+                    logger.warning("Could not create vault dir in %s: %s", root, exc)
+
+        return {
+            "status": "ok",
+            "project_root": str(root),
+            "checked": checked_items,
+            "created": created_items,
+        }
+
+    @classmethod
+    def _initialize_project_memory(
+        cls,
+        project_root: Path,
+        project_name: str | None = None,
+        project_id: str | None = None,
+        profile: Any = None,
+    ) -> Path:
+        """Create the canonical, project-local memory and Mya files without touching legacy data."""
+        cls.ensure_project_mya_environment(
+            project_root=project_root,
+            project_name=project_name,
+            project_id=project_id,
+            profile=profile,
+        )
+        return project_root / ".myagentos" / "memory"
 
     def clone_repository(
         self,

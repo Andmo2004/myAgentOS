@@ -462,8 +462,14 @@ class ProjectsScreen(Screen[None]):
         self.session.commit_short = proj.commit_short or ""
         self.session.project_profile = proj.profile
 
-        # Re-detect git state if directory exists
+        # Re-detect git state and ensure Mya environment if directory exists
         if Path(proj.path).exists():
+            self.service.ensure_project_mya_environment(
+                project_root=Path(proj.path),
+                project_name=proj.name,
+                project_id=proj.project_id,
+                profile=proj.profile,
+            )
             git = detect_git_info(Path(proj.path))
             if git:
                 self.session.working_tree_clean = git.clean

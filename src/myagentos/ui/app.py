@@ -148,7 +148,8 @@ class MyaApp(App[None]):
         search_paths: list[Path] = []
         if repo_path:
             search_paths.append(repo_path / ".env")
-        search_paths.extend([Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env"])
+        else:
+            search_paths.extend([Path.cwd() / ".env", Path(__file__).resolve().parents[3] / ".env"])
         for env_path in search_paths:
             if env_path.is_file():
                 try:
@@ -557,7 +558,7 @@ class MyaApp(App[None]):
     @staticmethod
     def _redact_secrets(cmd: ParsedCommand, raw: str) -> str:
         """Mask API keys in history and transcript."""
-        if cmd.kind in (SlashCommandKind.KEY, SlashCommandKind.SETTINGS):
+        if cmd.kind == SlashCommandKind.KEY:
             parts = cmd.argument.split(maxsplit=1)
             if len(parts) == 2:
                 return f"{raw.split(maxsplit=1)[0]} {parts[0]} ••••••••"
@@ -639,6 +640,12 @@ class MyaApp(App[None]):
 
             case SlashCommandKind.PROJECTS:
                 self.action_open_projects()
+
+            case SlashCommandKind.MEMORY:
+                await self._handle_memory_command(cmd.argument)
+
+            case SlashCommandKind.SKILLS:
+                await self._handle_skills_command(cmd.argument)
 
             case SlashCommandKind.INFO:
                 obs = ObservabilityService()
@@ -779,21 +786,34 @@ class MyaApp(App[None]):
                         f"{badge} [bold]Avatar cambiado a '{arg}':[/bold]\n\n{preview}"
                     )
 
-            case SlashCommandKind.COMPACT:
-                badge = format_command_badge("/compact")
-                self.screen.add_class("-compact")
-                self._append_mya_message(
-                    f"{badge} Densidad visual cambiada a [bold green]compacto[/bold green]."
-                )
+            case SlashCommandKind.DENSITY:
+                badge = format_command_badge("/density")
+                arg = cmd.argument.strip().lower()
+                if cmd.raw_input.strip().lower().startswith("/compact"):
+                    arg = "compact"
+                elif cmd.raw_input.strip().lower().startswith("/dense"):
+                    arg = "comfortable"
 
-            case SlashCommandKind.DENSE:
-                badge = format_command_badge("/dense")
-                self.screen.remove_class("-compact")
-                self._append_mya_message(
-                    f"{badge} Densidad visual cambiada a [bold green]cómodo[/bold green]."
-                )
+                if arg in ("compact", "compacto"):
+                    self.screen.add_class("-compact")
+                    self._append_mya_message(
+                        f"{badge} Densidad visual cambiada a [bold green]compacto[/bold green]."
+                    )
+                elif arg in ("comfortable", "dense", "cómodo", "comodo", "normal"):
+                    self.screen.remove_class("-compact")
+                    self._append_mya_message(
+                        f"{badge} Densidad visual cambiada a [bold green]cómodo[/bold green]."
+                    )
+                else:
+                    curr = "compacto" if self.screen.has_class("-compact") else "cómodo"
+                    self._append_mya_message(
+                        f"{badge} [bold]DENSIDAD VISUAL[/bold]\n"
+                        f"  Actual: [bold green]{curr}[/bold green]\n"
+                        "  Modos disponibles: compact, comfortable\n\n"
+                        "[dim]Uso: /density compact|comfortable[/dim]"
+                    )
 
-            case SlashCommandKind.KEY | SlashCommandKind.SETTINGS:
+            case SlashCommandKind.KEY:
                 self._handle_key_command(cmd.argument)
 
             case SlashCommandKind.MODEL:
@@ -1222,6 +1242,152 @@ class MyaApp(App[None]):
             f"{badge} [bold yellow]No se encontraron modelos disponibles que coincidan con:[/bold yellow] '{arg}'\n"
             f"[dim]Ejecute /model para ver la lista completa o /model refresh para actualizar.[/dim]"
         )
+
+    async def _handle_memory_command(self, argument: str) -> None:
+        """Handle /memory command to inspect or query Project and User memory (§46)."""
+        badge = format_command_badge("/memory")
+        arg = argument.strip()
+        mgr = getattr(self.mya_agent, "memory_manager", None)
+        active_proj = (
+            getattr(self.session, "project_id", None)
+            or getattr(self.session, "repository", None)
+            or "global"
+        )
+        if not arg or arg.lower() == "status":
+            if mgr:
+                user_rec = mgr.retrieve(
+                    user_id=getattr(self.session, "user_id", None),
+                    project_id=None,
+                    session_id=None,
+                    query="",
+                    limit=50,
+                )
+                proj_rec: list[Any] = (
+                    mgr.retrieve(
+                        user_id=None,
+                        project_id=active_proj,
+                        session_id=None,
+                        query="",
+                        limit=50,
+                    )
+                    if active_proj
+                    else []
+                )
+                sess_rec = mgr.retrieve(
+                    user_id=None,
+                    project_id=None,
+                    session_id=self.session.session_id,
+                    query="",
+                    limit=50,
+                )
+                self._append_mya_message(
+                    f"{badge} [bold]MEMORIA DEL SISTEMA[/bold]\n"
+                    f"  Proyecto activo: [bold green]{active_proj}[/bold green]\n"
+                    f"  • Memoria de Proyecto: [bold]{len(proj_rec)}[/bold] hechos verificados\n"
+                    f"  • Memoria de Usuario:  [bold]{len(user_rec)}[/bold] hechos/preferencias\n"
+                    f"  • Memoria de Sesión:   [bold]{len(sess_rec)}[/bold] entradas en el turno actual\n\n"
+                    "[dim]Uso: /memory search <término> | /memory[/dim]"
+                )
+            else:
+                self._append_mya_message(
+                    f"{badge} Memoria compartida activa para el proyecto [bold]{active_proj}[/bold]."
+                )
+        elif arg.lower().startswith("search "):
+            query = arg[7:].strip()
+            if mgr and query:
+                records = mgr.retrieve(
+                    user_id=getattr(self.session, "user_id", None),
+                    project_id=active_proj,
+                    session_id=self.session.session_id,
+                    query=query,
+                    limit=5,
+                )
+                if records:
+                    lines = [f"{badge} [bold]Coincidencias en memoria para '{query}':[/bold]"]
+                    for r in records:
+                        lines.append(f"  • [{r.scope.upper()}] {r.content[:120]}")
+                    self._append_mya_message("\n".join(lines))
+                else:
+                    self._append_mya_message(
+                        f"{badge} No se encontraron hechos de memoria para '{query}'."
+                    )
+            else:
+                self._append_mya_message(f"{badge} Consulta vacía o servicio no disponible.")
+        else:
+            self._append_mya_message(
+                f"{badge} Subcomando no reconocido. Uso: /memory [search <término>]"
+            )
+
+    async def _handle_skills_command(self, argument: str) -> None:
+        """Handle /skills command to discover and inspect capabilities (§57, §58)."""
+        badge = format_command_badge("/skills")
+        arg = argument.strip()
+        from myagentos.skills.registry import SkillRegistry
+
+        registry = getattr(self.mya_agent, "skill_registry", None) or SkillRegistry()
+        project_root = getattr(self.session, "repo_root", None)
+        registry.discover(project_root=project_root)
+        all_skills = registry.list_all_definitions()
+
+        if not arg or arg.lower() in ("list", "all"):
+            lines = [
+                f"{badge} [bold]CATÁLOGO DE SKILLS (CAPACIDADES)[/bold]\n"
+                "  Capacidades JIT descubiertas en el sistema:\n"
+            ]
+            if all_skills:
+                for s in all_skills:
+                    tags = " ".join(f"#{t}" for t in s.tags[:3])
+                    src_tag = f"[dim cyan][{s.source}][/dim cyan]"
+                    lines.append(
+                        f"  • {src_tag} [bold {Colors.PRIMARY}]{s.name}[/bold {Colors.PRIMARY}] "
+                        f"({s.version}) {tags}\n    [dim]{s.description}[/dim]"
+                    )
+            else:
+                lines.append("  • [dim]No hay skills registradas actualmente.[/dim]")
+            lines.append("\n[dim]Uso: /skills | /skills search <query> | /skills show <skill>[/dim]")
+            self._append_mya_message("\n".join(lines))
+        elif arg.lower().startswith("search "):
+            query = arg[7:].strip().lower()
+            matches = [
+                s
+                for s in all_skills
+                if query in s.name.lower()
+                or query in s.description.lower()
+                or any(query in tag.lower() for tag in s.tags)
+            ]
+            if matches:
+                lines = [f"{badge} [bold]Skills coincidentes con '{query}':[/bold]"]
+                for s in matches:
+                    src_tag = f"[{s.source}]"
+                    lines.append(f"  • {src_tag} [bold]{s.name}[/bold]: {s.description}")
+                self._append_mya_message("\n".join(lines))
+            else:
+                self._append_mya_message(f"{badge} No se encontraron skills para '{query}'.")
+        elif arg.lower().startswith("show "):
+            target = arg[5:].strip().lower()
+            defn = registry.get_definition(target)
+            if defn:
+                active = registry.load(defn.name)
+                preview = (active.content[:300] + "...") if active else "Sin contenido."
+                tags_str = ", ".join(f"#{t}" for t in defn.tags) if defn.tags else "ninguna"
+                req_str = ", ".join(defn.requires) if defn.requires else "ninguna"
+                lines = [
+                    f"{badge} [bold {Colors.PRIMARY}]SKILL: {defn.name}[/bold {Colors.PRIMARY}] "
+                    f"([dim]{defn.source}[/dim] v{defn.version})",
+                    f"  {defn.description}",
+                    f"  • Etiquetas: [cyan]{tags_str}[/cyan]",
+                    f"  • Requiere: [yellow]{req_str}[/yellow]",
+                    f"  • Suelo de riesgo: [magenta]{defn.risk_floor}[/magenta]",
+                    "",
+                    f"[dim]{preview}[/dim]",
+                ]
+                self._append_mya_message("\n".join(lines))
+            else:
+                self._append_mya_message(f"{badge} Skill '{target}' no encontrada en el registry.")
+        else:
+            self._append_mya_message(
+                f"{badge} Subcomando no reconocido. Uso: /skills | /skills search <query> | /skills show <skill>"
+            )
 
     async def _handle_natural_input(self, text: str) -> None:
         """Handle conversational or task intent input from the user."""

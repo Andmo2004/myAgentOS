@@ -29,6 +29,8 @@ def test_create_and_add_project(tmp_path: Path) -> None:
     assert proj_dir.is_dir()
     assert (proj_dir / ".git").is_dir()
     assert (proj_dir / ".myagentos" / "memory").is_dir()
+    assert (proj_dir / "MYA.md").is_file()
+    assert (proj_dir / ".mya" / "skills").is_dir()
     assert p1.mya_namespace_id == f"/vault/Proyectos/{p1.project_id}"
 
     # Verify event
@@ -46,6 +48,8 @@ def test_create_and_add_project(tmp_path: Path) -> None:
     assert p2.name == "existing-service"
     assert p2.state == ProjectState.ACTIVE
     assert (existing_dir / ".myagentos" / "memory").is_dir()
+    assert (existing_dir / "MYA.md").is_file()
+    assert (existing_dir / ".mya" / "skills").is_dir()
 
     # 3. Duplicate protection
     with pytest.raises(ValueError, match="already registered"):
@@ -137,3 +141,49 @@ def test_soft_delete_restore_and_purge_lifecycle(tmp_path: Path) -> None:
     # Check EventStore has final audit event
     events_purge = event_store.load_events(job_id=p_id)
     assert any(e.event_name == EventName.PROJECT_PERMANENTLY_DELETED for e in events_purge)
+
+
+def test_project_mya_environment_creation_and_non_overwriting(tmp_path: Path) -> None:
+    """Verify project creation/addition checks and creates Mya files (MYA.md, .mya/skills, memory) without overwriting existing files."""
+    reg = ProjectRegistry(storage_path=tmp_path / "reg.json")
+    service = ProjectManagerService(registry=reg)
+
+    # 1. Project without any pre-existing Mya files
+    clean_dir = tmp_path / "clean-repo"
+    clean_dir.mkdir()
+    (clean_dir / "app.py").write_text("print('test')")
+
+    p1 = service.add_project(path=clean_dir, name="Clean Repo")
+
+    # Verify files created inside project folder (NOT in global mya home)
+    mya_md = clean_dir / "MYA.md"
+    assert mya_md.is_file()
+    content = mya_md.read_text(encoding="utf-8")
+    assert "# MYA.md" in content
+    assert "Clean Repo" in content
+    assert "## Preferred Skills" in content
+    assert "- #python" in content
+    assert "- #testing" in content
+
+    skills_dir = clean_dir / ".mya" / "skills"
+    assert skills_dir.is_dir()
+    assert (skills_dir / "README.md").is_file()
+
+    memory_dir = clean_dir / ".myagentos" / "memory"
+    assert memory_dir.is_dir()
+
+    # 2. Project with PRE-EXISTING custom MYA.md (must NOT be overwritten)
+    custom_dir = tmp_path / "custom-repo"
+    custom_dir.mkdir()
+    existing_mya = custom_dir / "MYA.md"
+    existing_content = "# Custom Team Rules\n- Strictly zero-commit to main.\n"
+    existing_mya.write_text(existing_content, encoding="utf-8")
+
+    p2 = service.add_project(path=custom_dir, name="Custom Repo")
+
+    # Verify pre-existing MYA.md content is preserved
+    assert (custom_dir / "MYA.md").is_file()
+    assert (custom_dir / "MYA.md").read_text(encoding="utf-8") == existing_content
+    # Other missing directories were still created
+    assert (custom_dir / ".mya" / "skills").is_dir()
+    assert (custom_dir / ".myagentos" / "memory").is_dir()

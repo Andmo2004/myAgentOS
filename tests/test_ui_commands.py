@@ -37,14 +37,25 @@ class TestParseInput:
         cmd = parse_input("/status")
         assert cmd.kind == SlashCommandKind.STATUS
 
-    def test_jobs_command(self) -> None:
-        cmd = parse_input("/jobs")
-        assert cmd.kind == SlashCommandKind.JOBS
-
-    def test_job_detail_with_argument(self) -> None:
-        cmd = parse_input("/job abc123")
-        assert cmd.kind == SlashCommandKind.JOB_DETAIL
-        assert cmd.argument == "abc123"
+    def test_dead_commands_become_natural(self) -> None:
+        """Dead commands removed in cleanup (§34) must fallback to natural language."""
+        for dead_cmd in (
+            "/jobs",
+            "/job 123",
+            "/diff",
+            "/log",
+            "/cancel",
+            "/approve",
+            "/reject",
+            "/debug",
+            "/usage",
+            "/audit",
+            "/verify",
+            "/tests",
+            "/settings",
+        ):
+            cmd = parse_input(dead_cmd)
+            assert cmd.kind == SlashCommandKind.NATURAL
 
     def test_mya_command_with_prompt(self) -> None:
         cmd = parse_input("/mya añade autenticación con GitHub")
@@ -84,25 +95,15 @@ class TestParseInput:
         assert cmd.kind == SlashCommandKind.MODEL
         assert cmd.argument == "gpt-4o"
 
-    def test_diff_command(self) -> None:
-        cmd = parse_input("/diff")
-        assert cmd.kind == SlashCommandKind.DIFF
+    def test_memory_command(self) -> None:
+        cmd = parse_input("/memory search postgres")
+        assert cmd.kind == SlashCommandKind.MEMORY
+        assert cmd.argument == "search postgres"
 
-    def test_cancel_command(self) -> None:
-        cmd = parse_input("/cancel")
-        assert cmd.kind == SlashCommandKind.CANCEL
-
-    def test_approve_command(self) -> None:
-        cmd = parse_input("/approve")
-        assert cmd.kind == SlashCommandKind.APPROVE
-
-    def test_reject_command(self) -> None:
-        cmd = parse_input("/reject")
-        assert cmd.kind == SlashCommandKind.REJECT
-
-    def test_debug_command(self) -> None:
-        cmd = parse_input("/debug")
-        assert cmd.kind == SlashCommandKind.DEBUG
+    def test_skills_command(self) -> None:
+        cmd = parse_input("/skills search python")
+        assert cmd.kind == SlashCommandKind.SKILLS
+        assert cmd.argument == "search python"
 
     def test_clear_command(self) -> None:
         cmd = parse_input("/clear")

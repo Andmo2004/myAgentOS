@@ -7,9 +7,12 @@ from typing import Any
 from myagentos.core.errors import MyAgentOSError
 from myagentos.core.models.risk import RiskLevel
 from myagentos.skills.models import (
+    ActiveSkill,
+    SkillDefinition,
     SkillManifest,
     SkillMatchCriteria,
     SkillPermissions,
+    SkillSource,
     SkillVerification,
 )
 
@@ -19,7 +22,135 @@ class SkillLoadError(MyAgentOSError):
 
 
 class SkillLoader:
-    """Discovers, parses, and validates skills from standard directory layouts (§20)."""
+    """Discovers, parses, and validates skills from standard directory layouts (§20, §4, §10, §14)."""
+
+    @classmethod
+    def parse_frontmatter(cls, path: Path) -> dict[str, Any]:
+        """Parses only the YAML frontmatter without reading full body (§14)."""
+        lines: list[str] = []
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                first_line = f.readline()
+                if not first_line.startswith("---"):
+                    return {}
+                for line in f:
+                    if line.strip() == "---":
+                        break
+                    lines.append(line)
+        except Exception:
+            return {}
+        raw_yaml = "".join(lines)
+        if not raw_yaml:
+            return {}
+        try:
+            import yaml  # type: ignore[import-untyped]
+
+            loaded = yaml.safe_load(raw_yaml)
+            if isinstance(loaded, dict):
+                return loaded
+        except Exception:
+            pass
+        return cls._parse_simple_yaml(raw_yaml)
+
+    @classmethod
+    def read_skill_body(cls, path: Path) -> str:
+        """Reads only the markdown body following the YAML frontmatter."""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+        if text.startswith("---"):
+            parts = text.split("---", 2)
+            if len(parts) >= 3:
+                return parts[2].strip()
+        return text.strip()
+
+    @classmethod
+    def load_definition(cls, path: Path, source: SkillSource) -> SkillDefinition | None:
+        """Lightweight discovery of a skill definition from a SKILL.md file (§14)."""
+        if not path.is_file():
+            return None
+        meta = cls.parse_frontmatter(path)
+        if not meta and path.name.lower() in ("skill.json", "metadata.json", "metadata.yaml"):
+            try:
+                meta = cls._parse_yaml_or_json(path)
+            except Exception:
+                meta = {}
+        if not meta or "name" not in meta:
+            return None
+
+        name = str(meta["name"]).strip()
+        skill_id = f"{source}:{name}"
+        version = str(meta.get("version", "1.0.0"))
+        description = str(meta.get("description", ""))
+        tags = tuple(str(t).lower().lstrip("#") for t in meta.get("tags", []))
+        triggers = tuple(str(tr).lower() for tr in meta.get("triggers", []))
+        requires = tuple(str(r).lower() for r in meta.get("requires", []))
+        related = tuple(str(rel).lower() for rel in meta.get("related", []))
+        risk_floor = str(meta.get("risk_floor", meta.get("min_risk_level", "LOW"))).upper()
+        protected_paths = tuple(str(p) for p in meta.get("protected_paths_add", []))
+        requires_network = bool(meta.get("requires_network", False))
+        content_hash = str(meta.get("content_hash", ""))
+
+        return SkillDefinition(
+            id=skill_id,
+            name=name,
+            description=description,
+            version=version,
+            tags=tags,
+            triggers=triggers,
+            source=source,
+            path=path,
+            requires=requires,
+            related=related,
+            risk_floor=risk_floor,
+            protected_paths_add=protected_paths,
+            requires_network=requires_network,
+            content_hash=content_hash,
+        )
+
+    @classmethod
+    def discover_definitions(cls, root: Path, source: SkillSource) -> list[SkillDefinition]:
+        """Discovers all skill definitions under a root directory without loading bodies (§10, §14)."""
+        if not root.is_dir():
+            return []
+        definitions: list[SkillDefinition] = []
+        for child in sorted(root.iterdir()):
+            if child.name.startswith((".", "_")):
+                continue
+            if child.is_dir():
+                for candidate_name in (
+                    "SKILL.md",
+                    "skill.md",
+                    "metadata.yaml",
+                    "metadata.json",
+                    "skill.json",
+                ):
+                    candidate = child / candidate_name
+                    if candidate.is_file():
+                        defn = cls.load_definition(candidate, source=source)
+                        if defn:
+                            definitions.append(defn)
+                            break
+            elif child.is_file() and child.name.endswith(".md") and child.name.lower() != "readme.md":
+                defn = cls.load_definition(child, source=source)
+                if defn:
+                    definitions.append(defn)
+        return definitions
+
+    @classmethod
+    def load_active_skill(cls, defn: SkillDefinition, loaded_because: str = "") -> ActiveSkill:
+        """Loads the full body instructions of a selected skill (§16)."""
+        content = cls.read_skill_body(defn.path)
+        return ActiveSkill(
+            id=defn.id,
+            name=defn.name,
+            content=content,
+            source=defn.source,
+            version=defn.version,
+            tags=defn.tags,
+            loaded_because=loaded_because,
+        )
 
     @classmethod
     def load_skill_from_dir(cls, skill_dir: Path) -> SkillManifest:
@@ -28,12 +159,21 @@ class SkillLoader:
             raise SkillLoadError(f"Skill path is not a directory: {skill_dir}")
 
         meta_data: dict[str, Any] = {}
+        skill_md = skill_dir / "SKILL.md"
+        skill_md_lower = skill_dir / "skill.md"
         meta_yaml = skill_dir / "metadata.yaml"
         meta_yml = skill_dir / "metadata.yml"
         meta_json = skill_dir / "metadata.json"
         skill_json = skill_dir / "skill.json"
 
-        if meta_yaml.is_file():
+        instructions = ""
+        if skill_md.is_file():
+            meta_data = cls.parse_frontmatter(skill_md)
+            instructions = cls.read_skill_body(skill_md)
+        elif skill_md_lower.is_file():
+            meta_data = cls.parse_frontmatter(skill_md_lower)
+            instructions = cls.read_skill_body(skill_md_lower)
+        elif meta_yaml.is_file():
             meta_data = cls._parse_yaml_or_json(meta_yaml)
         elif meta_yml.is_file():
             meta_data = cls._parse_yaml_or_json(meta_yml)
@@ -44,10 +184,11 @@ class SkillLoader:
         else:
             raise SkillLoadError(f"No metadata file found in {skill_dir}")
 
-        instructions_file = skill_dir / "instructions.md"
-        instructions = (
-            instructions_file.read_text(encoding="utf-8") if instructions_file.is_file() else ""
-        )
+        if not instructions:
+            instructions_file = skill_dir / "instructions.md"
+            instructions = (
+                instructions_file.read_text(encoding="utf-8") if instructions_file.is_file() else ""
+            )
 
         return cls.create_manifest(meta_data, instructions=instructions, skill_dir=skill_dir)
 

@@ -209,6 +209,7 @@ async def test_mya_app_slash_clear(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_mya_app_model_auto_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify model autodetection based on environment variables and .env."""
+    temp_dir = Path(tempfile.mkdtemp())
     # Default without keys
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -216,33 +217,33 @@ async def test_mya_app_model_auto_detection(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("MYA_MODEL", raising=False)
 
-    app_default = MyaApp()
+    app_default = MyaApp(repo_path=temp_dir)
     assert app_default.mya_agent.model_id == "mock-mya"
     assert "mock" in app_default.gateway.adapters
 
     # Explicit MYA_MODEL override
     monkeypatch.setenv("MYA_MODEL", "custom-model-id")
-    app_custom = MyaApp()
+    app_custom = MyaApp(repo_path=temp_dir)
     assert app_custom.mya_agent.model_id == "custom-model-id"
 
     # Claude / Anthropic detection
     monkeypatch.delenv("MYA_MODEL", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-fake-key")
-    app_claude = MyaApp()
+    app_claude = MyaApp(repo_path=temp_dir)
     assert app_claude.mya_agent.model_id == "claude-3-5-sonnet-latest"
     assert "anthropic" in app_claude.gateway.adapters
 
     # OpenAI detection
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake-key")
-    app_openai = MyaApp()
+    app_openai = MyaApp(repo_path=temp_dir)
     assert app_openai.mya_agent.model_id == "gpt-4o"
     assert "openai" in app_openai.gateway.adapters
 
     # Gemini detection
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "fake-gemini-key")
-    app_gemini = MyaApp()
+    app_gemini = MyaApp(repo_path=temp_dir)
     assert app_gemini.mya_agent.model_id == "gemini-2.0-flash"
     assert "google" in app_gemini.gateway.adapters
 
