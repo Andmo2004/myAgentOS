@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Generator
+from fnmatch import fnmatch
 from pathlib import Path, PurePath
 
 from myagentos.core.errors import (
@@ -228,3 +229,37 @@ def safe_walk(
                 yield fpath, rel_path
             except ValueError:
                 continue
+
+
+def matches_path_pattern(path: str, pattern: str) -> bool:
+    """Matches a relative path against a glob pattern, supporting standard recursive globs.
+
+    Supports:
+    - Direct matches and fnmatch wildcards (*, ?, [a-z])
+    - Recursive globs ('**/*', '**') matching both direct and nested descendants
+    - Directory wildcards (e.g. 'src/**/*' matching 'src/app.py' and 'src/a/b.py')
+    """
+    normalized = path.strip("/")
+    stripped_pat = pattern.strip("/")
+
+    if (
+        fnmatch(normalized, pattern)
+        or fnmatch(path, pattern)
+        or fnmatch(normalized, stripped_pat)
+    ):
+        return True
+
+    # Recursive directory glob: e.g. "src/**/*" or "/src/**/*"
+    if stripped_pat.endswith("/**/*"):
+        prefix = stripped_pat[:-5].strip("/")
+        return (
+            fnmatch(normalized, f"{prefix}/*")
+            or fnmatch(normalized, f"{prefix}/**")
+            or normalized.startswith(f"{prefix}/")
+        )
+
+    # Bare recursive glob: "**/*" or "**"
+    if stripped_pat in ("**/*", "**", "*"):
+        return True
+
+    return False

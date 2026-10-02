@@ -3,7 +3,6 @@
 import hashlib
 import re
 import shlex
-from fnmatch import fnmatch
 from pathlib import Path, PurePath
 from typing import Any
 
@@ -15,6 +14,7 @@ from myagentos.core.errors import (
 from myagentos.core.models.patch import FilePatch, PatchOperation, PatchSet
 from myagentos.core.models.token import CapabilityToken
 from myagentos.core.paths import (
+    matches_path_pattern,
     safe_read_text,
     safe_walk,
     safe_write_text,
@@ -75,17 +75,15 @@ class ToolBroker:
         pure = PurePath(path)
         if pure.is_absolute() or ".." in pure.parts:
             return False
-        normalized = path.strip("/")
         return any(
-            fnmatch(normalized, pat) or fnmatch(path, pat) or fnmatch(normalized, pat.strip("/"))
+            matches_path_pattern(path, pat)
             for pat in allowed_patterns
         )
 
     def _is_protected(self, path: str) -> bool:
         """Verifies if path matches any protected path pattern (§13.2)."""
-        normalized = path.strip("/")
         return any(
-            fnmatch(normalized, pat) or fnmatch(path, pat) or fnmatch(normalized, pat.strip("/"))
+            matches_path_pattern(path, pat)
             for pat in self.protected_paths
         )
 

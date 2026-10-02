@@ -2,13 +2,13 @@
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from fnmatch import fnmatch
 from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from myagentos.core.models.data_policy import TrustTag
 from myagentos.core.models.risk import RiskLevel
+from myagentos.core.paths import matches_path_pattern
 
 
 class NetworkScope(StrEnum):
@@ -60,16 +60,14 @@ class CapabilityToken(BaseModel):
         return datetime.now(UTC) > self.expires_at
 
     def is_read_allowed(self, file_path: str) -> bool:
-        normalized = file_path.strip("/")
         return any(
-            fnmatch(normalized, pattern) or fnmatch(file_path, pattern)
+            matches_path_pattern(file_path, pattern)
             for pattern in self.read_scope
         )
 
     def is_write_allowed(self, file_path: str) -> bool:
-        normalized = file_path.strip("/")
         return any(
-            fnmatch(normalized, pattern) or fnmatch(file_path, pattern)
+            matches_path_pattern(file_path, pattern)
             for pattern in self.write_scope
         )
 
