@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import secrets
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -21,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
+import jwt
 from pydantic import BaseModel, ConfigDict, Field
 
 from myagentos.gateway.credential_store import CredentialStore, PlanCredentialSecret
@@ -41,6 +43,8 @@ class OpenAIOAuthConfig(BaseModel):
     auth_url: str = "https://auth.openai.com/authorize"
     token_url: str = "https://auth.openai.com/oauth/token"
     revoke_url: str = "https://auth.openai.com/oauth/revoke"
+    issuer: str = "https://auth.openai.com"
+    jwks_url: str = "https://auth.openai.com/.well-known/jwks.json"
     client_id: str = "dynamic_agent_client"
     scopes: list[str] = Field(
         default_factory=lambda: ["openid", "profile", "email", "model.request", "offline_access"]
@@ -102,8 +106,6 @@ def _decode_jwt_unverified_claims(jwt_str: str) -> dict[str, Any]:
 class _CallbackHandler(BaseHTTPRequestHandler):
     """Temporary HTTP handler capturing OAuth 2.0 loopback redirect."""
 
-    server_ref: Any = None
-
     def log_message(self, format: str, *args: Any) -> None:
         """Suppress stdout access logging of tokens/queries."""
 
@@ -116,7 +118,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             return
 
         query_params = urllib.parse.parse_qs(parsed_url.query)
-        self.server_ref.received_params = query_params
+        self.server.received_params = query_params
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -146,7 +148,6 @@ class OAuthLoopbackListener:
         self.server = _LoopbackServer((self.host, 0), _CallbackHandler)
         self.port: int = self.server.server_address[1]
         self.server.received_params = {}
-        _CallbackHandler.server_ref = self.server
 
     def wait_for_callback(self, timeout_seconds: float = 120.0) -> dict[str, list[str]]:
         """Waits for a single HTTP GET /callback request and returns parsed parameters."""
@@ -182,6 +183,71 @@ class OAuthOpenAIEngine:
             "code_challenge_method": "S256",
         }
         return f"{self.config.auth_url}?{urllib.parse.urlencode(params)}"
+
+    def _validate_id_token(
+        self,
+        id_token: str,
+        expected_client_id: str,
+        context: PKCEContext,
+        http_client: Callable[..., Any] | None = None,
+    ) -> dict[str, Any]:
+        """Validates OIDC identity claims using remote JWKS and required OIDC invariants."""
+        try:
+            header = jwt.get_unverified_header(id_token)
+            algorithm = header.get("alg") or "RS256"
+        except Exception as exc:
+            raise PlanAuthenticationError(
+                "ID token is not a valid JWT",
+                platform=ConnectionPlatform.CHATGPT_PLAN.value,
+                error_code="invalid_id_token",
+            ) from exc
+
+        if algorithm not in {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}:
+            raise PlanAuthenticationError(
+                f"Unsupported ID token signing algorithm '{algorithm}'",
+                platform=ConnectionPlatform.CHATGPT_PLAN.value,
+                error_code="unsupported_id_token_alg",
+            )
+
+        try:
+            jwks_client = jwt.PyJWKClient(self.config.jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(id_token)
+        except Exception as exc:
+            raise PlanAuthenticationError(
+                "Unable to verify ID token signature against the configured JWKS",
+                platform=ConnectionPlatform.CHATGPT_PLAN.value,
+                error_code="jwks_unavailable",
+            ) from exc
+
+        try:
+            claims = jwt.decode(
+                id_token,
+                signing_key.key,
+                algorithms=[algorithm],
+                audience=expected_client_id,
+                issuer=self.config.issuer,
+                options={
+                    "require": ["exp", "iat", "iss", "aud", "sub", "nonce"],
+                    "verify_exp": True,
+                    "verify_aud": True,
+                    "verify_iss": True,
+                },
+            )
+        except jwt.InvalidTokenError as exc:
+            raise PlanAuthenticationError(
+                f"Invalid ID token: {exc}",
+                platform=ConnectionPlatform.CHATGPT_PLAN.value,
+                error_code="invalid_id_token",
+            ) from exc
+
+        if claims.get("nonce") != context.nonce:
+            raise PlanAuthenticationError(
+                "ID token nonce mismatch; possible replay or interception",
+                platform=ConnectionPlatform.CHATGPT_PLAN.value,
+                error_code="nonce_mismatch",
+            )
+
+        return claims
 
     def exchange_code_for_tokens(
         self,
@@ -241,13 +307,13 @@ class OAuthOpenAIEngine:
                 platform=ConnectionPlatform.CHATGPT_PLAN.value,
             )
 
-        # Validate ID token if present
-        claims: dict[str, Any] = _decode_jwt_unverified_claims(id_token) if id_token else {}
-        if id_token and "nonce" in claims and claims["nonce"] != context.nonce:
-            raise PlanAuthenticationError(
-                "ID token nonce mismatch; possible replay or interception",
-                platform=ConnectionPlatform.CHATGPT_PLAN.value,
-                error_code="nonce_mismatch",
+        claims: dict[str, Any] = {}
+        if id_token:
+            claims = self._validate_id_token(
+                id_token=id_token,
+                expected_client_id=issued_client_id,
+                context=context,
+                http_client=http_client,
             )
 
         account_label = claims.get("email") or claims.get("sub") or "ChatGPT Account"
@@ -410,7 +476,13 @@ class OAuthOpenAIEngine:
         if on_url_ready:
             on_url_ready(auth_url)
         elif open_browser:
-            threading.Thread(target=lambda: webbrowser.open(auth_url), daemon=True).start()
+            opened_browser = webbrowser.open(auth_url)
+            if not opened_browser:
+                print(
+                    "[WARN] Browser could not be opened automatically. Open this URL manually: "
+                    f"{auth_url}",
+                    file=sys.stderr,
+                )
 
         try:
             params = listener.wait_for_callback(timeout_seconds=timeout_seconds)

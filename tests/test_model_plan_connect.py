@@ -20,11 +20,14 @@ import json
 import os
 import stat
 import urllib.error
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
+import jwt
 import pytest
 
 from myagentos.fsm.states import JobState
@@ -165,6 +168,96 @@ def test_pkce_generation_and_callback_validation() -> None:
     assert f"code_challenge={ctx.code_challenge}" in auth_url
     assert f"state={ctx.state}" in auth_url
     assert "code_challenge_method=S256" in auth_url
+
+
+def test_connect_interactive_warns_when_browser_open_fails(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    state_value = "expected-state"
+
+    class FakeContext:
+        state = state_value
+        nonce = "nonce-123"
+        code_verifier = "cv"
+        code_challenge = "challenge-123"
+        redirect_uri = "http://127.0.0.1:14555/callback"
+
+    class FakeListener:
+        def __init__(self, host: str = "127.0.0.1") -> None:
+            self.host = host
+            self.port = 14555
+            self.received_params = {"code": ["abc"], "state": [state_value]}
+
+        def wait_for_callback(self, timeout_seconds: float = 120.0) -> dict[str, list[str]]:
+            return self.received_params
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("myagentos.gateway.oauth_openai.OAuthLoopbackListener", FakeListener)
+    monkeypatch.setattr(
+        "myagentos.gateway.oauth_openai.generate_pkce_context",
+        lambda port, host="127.0.0.1": FakeContext(),
+    )
+    monkeypatch.setattr("myagentos.gateway.oauth_openai.webbrowser.open", lambda url: False)
+    engine = OAuthOpenAIEngine()
+
+    with patch.object(
+        engine,
+        "exchange_code_for_tokens",
+        return_value=PlanCredentialSecret(
+            connection_id="conn-openai-chatgpt",
+            provider="openai",
+            platform=ConnectionPlatform.CHATGPT_PLAN.value,
+            access_token="token",
+            account_id="user_123",
+            account_label="user@example.com",
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        ),
+    ):
+        engine.connect_interactive(open_browser=True)
+
+    captured = capsys.readouterr()
+    assert "Browser could not be opened automatically" in captured.err
+    assert "https://auth.openai.com/authorize" in captured.err
+
+
+def test_oidc_id_token_rejects_wrong_audience_and_issuer() -> None:
+    context = generate_pkce_context(port=14555, host="127.0.0.1")
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    token = jwt.encode(
+        {
+            "iss": "https://evil.example",
+            "aud": "other-client",
+            "sub": "user_123",
+            "email": "user@example.com",
+            "nonce": context.nonce,
+            "exp": int(datetime.now(UTC).timestamp()) - 60,
+            "iat": int(datetime.now(UTC).timestamp()) - 120,
+        },
+        private_key,
+        algorithm="RS256",
+    )
+    engine = OAuthOpenAIEngine()
+
+    with patch("myagentos.gateway.oauth_openai.jwt.PyJWKClient") as mock_jwks, patch(
+        "myagentos.gateway.oauth_openai.jwt.decode",
+        side_effect=jwt.InvalidTokenError("audience mismatch"),
+    ):
+        mock_jwks.return_value.get_signing_key_from_jwt.return_value.key = public_key
+
+        with pytest.raises(PlanAuthenticationError, match="audience|issuer|expired|nonce"):
+            engine.exchange_code_for_tokens(
+                "code-123",
+                context,
+                http_client=lambda req: {
+                    "access_token": "access-token",
+                    "id_token": token,
+                    "expires_in": 3600,
+                },
+            )
 
 
 # ---------------------------------------------------------------------------

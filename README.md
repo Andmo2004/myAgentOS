@@ -1,10 +1,12 @@
-# MYA (myAgenticOS v2.2+)
+# MYA (myAgentOS 0.1.0)
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![Type Checked with Mypy Strict](https://img.shields.io/badge/mypy-strict%20checked-green.svg)](http://mypy-lang.org/)
 [![Code Style: Ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
-[![Tests: Pytest](https://img.shields.io/badge/tests-309%20passed-brightgreen.svg)](https://docs.pytest.org/)
+[![Verified: OAuth plan-connect suite](https://img.shields.io/badge/verified-oauth%20suite%2017%20passed-brightgreen.svg)](https://docs.pytest.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](LICENSE)
+
+> **Estado actual (2026-10-02):** versión del paquete `0.1.0`, flujo OAuth/OIDC de ChatGPT implementado y validado por pruebas relevantes, sin validación de cuenta real de OpenAI/ChatGPT en este entorno.
 
 > **Tú hablas con Mya. Los agentes hacen el trabajo. myAgentOS gobierna y garantiza la seguridad.**
 
@@ -16,7 +18,9 @@
                       Mya
 ```
 
-**MYA** es la voz, interfaz conversacional y presencia inteligente de **myAgentOS**, un **Sistema Operativo Agéntico para Ingeniería de Software** de grado de producción gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/specification.md`](docs/specification.md).
+**MYA** es la voz, interfaz conversacional y presencia inteligente de **myAgentOS**, un **Sistema Operativo Agéntico para Ingeniería de Software** gobernado por contratos formales, seguridad de mínimo privilegio, evidencia verificable y preservación monótona de riesgo conforme a la especificación técnica [`docs/specification.md`](docs/specification.md).
+
+La versión actual del paquete en [pyproject.toml](pyproject.toml) es `0.1.0`. La conexión de planes con ChatGPT se encuentra implementada y validada a nivel de regresión, pero la autenticación con una cuenta real de OpenAI/ChatGPT no se ha ejecutado en este entorno.
 
 A diferencia de los asistentes de código tradicionales que son meros envoltorios de un modelo de lenguaje y confían ciegamente en salidas no acotadas, **MYA** actúa como el puente inteligente entre el desarrollador y una infraestructura de agentes especializados estrictamente gobernados:
 
@@ -441,23 +445,16 @@ Para profundizar en la arquitectura, la formalización matemática y los procedi
 
 ## Calidad de Código y Validación
 
-El proyecto aplica controles de calidad rigurosos y obligatorios en cada cambio:
+La verificación confirmada en esta sesión fue la suite relevante del flujo de conexión de planes con OAuth/OIDC:
 
 ```bash
-# 1. Ejecución de la suite completa de pruebas (273 tests)
-uv run pytest
-
-# 2. Análisis estático de tipos con tipado estricto
-uv run mypy src tests
-
-# 3. Linter y formateador de código
-uv run ruff check src tests
+cd /Users/Andres/Desktop/side_projects/myAgentOS && ./.venv/bin/python -m pytest -q tests/test_model_plan_connect.py
 ```
 
-Estado actual del control de calidad:
-- **Pytest:** `273/273 passed` (0 fallos).
-- **Mypy:** `Success: no issues found in 145 source files` bajo `--strict`.
-- **Ruff:** `All checks passed!` (0 advertencias).
+Resultado verificado:
+- **Pytest (flujo OAuth/plan connect):** `17 passed in 1.08s`.
+
+No se ha validado un login real con una cuenta de ChatGPT de producción ni un entorno de Claude autenticado externamente; por tanto, la evidencia actual es de regresión y contrato de código, no de integración con proveedor en vivo.
 
 ---
 
