@@ -116,48 +116,36 @@ def test_deterministic_note_validator(tmp_path: Path) -> None:
     src_dir.mkdir(parents=True)
     billing_file = src_dir / "billing.py"
     billing_file.write_text(
-        "class InvoiceCalculator:\n"
-        "    def calculate(self):\n"
-        "        return 100\n"
+        "class InvoiceCalculator:\n    def calculate(self):\n        return 100\n"
     )
 
     validator = DeterministicNoteValidator(tmp_path)
 
     # 1. Valid symbol anchor -> transitions to VERIFIED
-    valid_note = _make_sample_note(
-        anchors=["src/billing.py:InvoiceCalculator@commit-1"]
-    )
+    valid_note = _make_sample_note(anchors=["src/billing.py:InvoiceCalculator@commit-1"])
     verified = validator.validate_and_transition(valid_note)
     assert verified.status == NoteStatus.VERIFIED
     assert len(verified.rejection_reasons) == 0
 
     # 2. Valid line anchor -> transitions to VERIFIED
-    line_note = _make_sample_note(
-        anchors=["src/billing.py:2@commit-1"]
-    )
+    line_note = _make_sample_note(anchors=["src/billing.py:2@commit-1"])
     verified_line = validator.validate_and_transition(line_note)
     assert verified_line.status == NoteStatus.VERIFIED
 
     # 3. Nonexistent file anchor -> transitions to REJECTED
-    broken_file_note = _make_sample_note(
-        anchors=["src/missing.py:Foo@commit-1"]
-    )
+    broken_file_note = _make_sample_note(anchors=["src/missing.py:Foo@commit-1"])
     rejected_file = validator.validate_and_transition(broken_file_note)
     assert rejected_file.status == NoteStatus.REJECTED
     assert any("does not exist" in r for r in rejected_file.rejection_reasons)
 
     # 4. Missing symbol anchor -> transitions to REJECTED
-    broken_sym_note = _make_sample_note(
-        anchors=["src/billing.py:NonExistentClass@commit-1"]
-    )
+    broken_sym_note = _make_sample_note(anchors=["src/billing.py:NonExistentClass@commit-1"])
     rejected_sym = validator.validate_and_transition(broken_sym_note)
     assert rejected_sym.status == NoteStatus.REJECTED
     assert any("not found" in r for r in rejected_sym.rejection_reasons)
 
     # 5. Out of bounds line anchor -> transitions to REJECTED
-    oob_note = _make_sample_note(
-        anchors=["src/billing.py:999@commit-1"]
-    )
+    oob_note = _make_sample_note(anchors=["src/billing.py:999@commit-1"])
     rejected_oob = validator.validate_and_transition(oob_note)
     assert rejected_oob.status == NoteStatus.REJECTED
     assert any("out of bounds" in r for r in rejected_oob.rejection_reasons)

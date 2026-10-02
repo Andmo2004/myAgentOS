@@ -144,7 +144,7 @@ def test_soft_delete_restore_and_purge_lifecycle(tmp_path: Path) -> None:
 
 
 def test_project_mya_environment_creation_and_non_overwriting(tmp_path: Path) -> None:
-    """Verify project creation/addition checks and creates Mya files (MYA.md, .mya/skills, memory) without overwriting existing files."""
+    """Verify project creation creates Mya files without overwriting existing files."""
     reg = ProjectRegistry(storage_path=tmp_path / "reg.json")
     service = ProjectManagerService(registry=reg)
 
@@ -153,7 +153,7 @@ def test_project_mya_environment_creation_and_non_overwriting(tmp_path: Path) ->
     clean_dir.mkdir()
     (clean_dir / "app.py").write_text("print('test')")
 
-    p1 = service.add_project(path=clean_dir, name="Clean Repo")
+    service.add_project(path=clean_dir, name="Clean Repo")
 
     # Verify files created inside project folder (NOT in global mya home)
     mya_md = clean_dir / "MYA.md"
@@ -179,7 +179,7 @@ def test_project_mya_environment_creation_and_non_overwriting(tmp_path: Path) ->
     existing_content = "# Custom Team Rules\n- Strictly zero-commit to main.\n"
     existing_mya.write_text(existing_content, encoding="utf-8")
 
-    p2 = service.add_project(path=custom_dir, name="Custom Repo")
+    service.add_project(path=custom_dir, name="Custom Repo")
 
     # Verify pre-existing MYA.md content is preserved
     assert (custom_dir / "MYA.md").is_file()
@@ -254,7 +254,7 @@ def test_ensure_gitignore_creates_file_and_appends_entries(tmp_path: Path):
 
 
 def test_ensure_gitignore_appends_only_missing_and_respects_globs(tmp_path: Path):
-    """Ensure .gitignore appends only missing entries without duplicating existing or glob-covered items."""
+    """Ensure .gitignore appends only missing entries without duplicating items."""
     repo = tmp_path / "repo-partial-gitignore"
     repo.mkdir()
     (repo / ".gitignore").write_text("build/\n.myagentos/\nmya*.md\n", encoding="utf-8")
@@ -272,5 +272,3 @@ def test_ensure_gitignore_appends_only_missing_and_respects_globs(tmp_path: Path
     assert "build/" in content
     assert ".mya/" in content
     assert "MYA.md.bak" in content
-
-

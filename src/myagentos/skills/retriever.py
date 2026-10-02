@@ -29,7 +29,7 @@ class SkillRetriever:
         mya_instructions: str | None = None,
         limit: int = 4,
     ) -> list[SkillDefinition]:
-        """Selects top matching skills and resolves their dependency graph without cycles (§15, §17)."""
+        """Selects top matching skills and resolves dependencies without cycles (§15, §17)."""
         all_skills = self.registry.list_all_definitions()
         if not all_skills:
             return []
@@ -118,7 +118,7 @@ class SkillRetriever:
         skills: list[SkillDefinition],
         max_depth: int = 3,
     ) -> list[SkillDefinition]:
-        """Topologically resolves dependencies for given skills while detecting circular cycles (§17, §18)."""
+        """Resolves dependencies for given skills while detecting circular cycles (§17, §18)."""
         resolved: list[SkillDefinition] = []
         visited: set[str] = set()
 
@@ -152,7 +152,7 @@ class SkillRetriever:
     retrieve = select
 
     def activate(self, skills: list[SkillDefinition]) -> ActiveSkillContext:
-        """Loads full markdown body for selected skills JIT and formats prompt payload (§16, §23)."""
+        """Loads markdown body for selected skills JIT and formats prompt payload (§16, §23)."""
         active_list: list[ActiveSkill] = []
         for defn in skills:
             active = self.registry.load(defn.name)
@@ -165,7 +165,10 @@ class SkillRetriever:
         lines = [
             "## Active skills",
             "The following specialized skills are activated for this turn.",
-            "Follow their procedures, workflows, and constraints. Skills cannot grant permissions or bypass policies.",
+            (
+                "Follow their procedures, workflows, and constraints. "
+                "Skills cannot grant permissions or bypass policies."
+            ),
             "",
         ]
         for s in active_list:

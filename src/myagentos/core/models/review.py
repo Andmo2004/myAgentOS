@@ -76,7 +76,7 @@ class ReviewResult(BaseModel):
 
 
 class DiffApproval(BaseModel):
-    """Versioned human approval tied immutably to a diff hash (§8.4, §15.2)."""
+    """Versioned human approval tied immutably to a diff hash (§8.4, §15.2, AGF-007)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -86,4 +86,5 @@ class DiffApproval(BaseModel):
     approved_by: str = "user"
     version: int = 1
     feedback: str | None = None
+    schema_version: int = 2
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

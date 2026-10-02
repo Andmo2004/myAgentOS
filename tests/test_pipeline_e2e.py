@@ -237,4 +237,3 @@ def test_cli_cmd_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Verify disk state
     assert target.read_text() == "MESSAGE = 'new'\n"
-

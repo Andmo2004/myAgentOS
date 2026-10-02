@@ -69,4 +69,3 @@ PRESENTATION_TO_TEXTUAL: Final[dict[str, str]] = {
     "high_contrast": MYA_HIGH_CONTRAST.name,
     "monochrome": "ansi-dark",
 }
-

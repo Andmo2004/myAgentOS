@@ -1,6 +1,7 @@
 """Identidad visual de Mya: paleta TrueColor, estilo por proveedor, wordmark con degradado,
 bienvenida accionable, indicador de "pensando" y barra de estado segmentada.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,15 +22,15 @@ from textual.widgets import Static
 REDUCED_MOTION = bool(os.environ.get("MYA_REDUCED_MOTION"))
 
 # --- Paleta base TrueColor (común a todos los proveedores) -------------------
-INK = "#15131F"      # Fondo principal
+INK = "#15131F"  # Fondo principal
 SURFACE = "#1D1A2B"  # Bloques secundarios y fondos inactivos
-PANEL = "#2A2640"    # Segmentos activos de la barra y paneles
-LINE = "#3A3556"     # Separadores, bordes tenues
-MUTED = "#8E89A8"    # Texto secundario
-TEXT = "#E8E3F2"     # Texto principal
-SAND = "#EDC987"     # Pendiente / aviso / mensajes del usuario
-SAGE = "#8CC7A1"     # Correcto (siempre con ✓)
-RED = "#F2635A"      # Error
+PANEL = "#2A2640"  # Segmentos activos de la barra y paneles
+LINE = "#3A3556"  # Separadores, bordes tenues
+MUTED = "#8E89A8"  # Texto secundario
+TEXT = "#E8E3F2"  # Texto principal
+SAND = "#EDC987"  # Pendiente / aviso / mensajes del usuario
+SAGE = "#8CC7A1"  # Correcto (siempre con ✓)
+RED = "#F2635A"  # Error
 
 
 # --- Proveedores -------------------------------------------------------------
@@ -37,41 +38,74 @@ RED = "#F2635A"      # Error
 class ProviderStyle:
     id: str
     label: str
-    primary: str                     # Color principal del tema
-    gradient: tuple[str, str]        # Degradado del wordmark: izquierda → derecha
-    glyph: str                       # Glifo firma: barra de estado y avisos
-    spinner: tuple[str, ...]         # Frames del indicador "pensando"
-    phrases: tuple[str, ...]         # Frases que rotan mientras piensa
+    primary: str  # Color principal del tema
+    gradient: tuple[str, str]  # Degradado del wordmark: izquierda → derecha
+    glyph: str  # Glifo firma: barra de estado y avisos
+    spinner: tuple[str, ...]  # Frames del indicador "pensando"
+    phrases: tuple[str, ...]  # Frases que rotan mientras piensa
 
 
-PROVIDERS: dict[str, ProviderStyle] = {p.id: p for p in (
-    ProviderStyle(
-        "mya", "Mya", "#D97BB6", (SAND, "#D97BB6"), "◆",
-        tuple("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"), ("trabajando",),
-    ),
-    ProviderStyle(
-        "mock", "Mock", "#45C8DC", ("#B8F2F7", "#38BDD8"), "◇",
-        tuple("▁▂▃▄▅▆▇█▇▆▅▄▃▂"), ("simulando respuesta", "generando datos de prueba"),
-    ),
-    ProviderStyle(
-        "claude", "Claude", "#E2804F", ("#F2B880", "#E2804F"), "✺",
-        tuple("◜◠◝◞◡◟"), ("pensando", "dándole vueltas", "ordenando ideas"),
-    ),
-    ProviderStyle(
-        "openai", "OpenAI", "#10A37F", ("#8FE3C8", "#10A37F"), "◉",
-        tuple("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"), ("razonando", "analizando", "componiendo"),
-    ),
-    ProviderStyle(
-        "gemini", "Gemini", "#5B9DF9", ("#5B9DF9", "#A78BFA"), "✦",
-        tuple("✦✧✦✧"), ("explorando", "conectando ideas", "sintetizando"),
-    ),
-)}
+PROVIDERS: dict[str, ProviderStyle] = {
+    p.id: p
+    for p in (
+        ProviderStyle(
+            "mya",
+            "Mya",
+            "#D97BB6",
+            (SAND, "#D97BB6"),
+            "◆",
+            tuple("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+            ("trabajando",),
+        ),
+        ProviderStyle(
+            "mock",
+            "Mock",
+            "#45C8DC",
+            ("#B8F2F7", "#38BDD8"),
+            "◇",
+            tuple("▁▂▃▄▅▆▇█▇▆▅▄▃▂"),
+            ("simulando respuesta", "generando datos de prueba"),
+        ),
+        ProviderStyle(
+            "claude",
+            "Claude",
+            "#E2804F",
+            ("#F2B880", "#E2804F"),
+            "✺",
+            tuple("◜◠◝◞◡◟"),
+            ("pensando", "dándole vueltas", "ordenando ideas"),
+        ),
+        ProviderStyle(
+            "openai",
+            "OpenAI",
+            "#10A37F",
+            ("#8FE3C8", "#10A37F"),
+            "◉",
+            tuple("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+            ("razonando", "analizando", "componiendo"),
+        ),
+        ProviderStyle(
+            "gemini",
+            "Gemini",
+            "#5B9DF9",
+            ("#5B9DF9", "#A78BFA"),
+            "✦",
+            tuple("✦✧✦✧"),
+            ("explorando", "conectando ideas", "sintetizando"),
+        ),
+    )
+}
 
 _VENDOR_ALIASES = {"anthropic": "claude", "google": "gemini", "openai": "openai"}
 _PREFIXES = (
-    ("claude", "claude"), ("gpt", "openai"), ("chatgpt", "openai"),
-    ("o1", "openai"), ("o3", "openai"), ("o4", "openai"),
-    ("gemini", "gemini"), ("mock", "mock"),
+    ("claude", "claude"),
+    ("gpt", "openai"),
+    ("chatgpt", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("gemini", "gemini"),
+    ("mock", "mock"),
 )
 
 
@@ -135,19 +169,21 @@ def register_all_themes(app: Any) -> None:
 
 # Markdown de las respuestas: independiente del proveedor, para que el
 # historial no cambie de color al cambiar de modelo.
-MYA_RICH_THEME = RichTheme({
-    "markdown.code": f"bold {SAND}",
-    "markdown.code_block": TEXT,
-    "markdown.link": f"underline {TEXT}",
-    "markdown.link_url": MUTED,
-    "markdown.item.bullet": MUTED,
-    "markdown.item.number": MUTED,
-    "markdown.h1": f"bold {TEXT}",
-    "markdown.h2": f"bold {TEXT}",
-    "markdown.h3": f"bold {TEXT}",
-    "markdown.block_quote": MUTED,
-    "markdown.hr": LINE,
-})
+MYA_RICH_THEME = RichTheme(
+    {
+        "markdown.code": f"bold {SAND}",
+        "markdown.code_block": TEXT,
+        "markdown.link": f"underline {TEXT}",
+        "markdown.link_url": MUTED,
+        "markdown.item.bullet": MUTED,
+        "markdown.item.number": MUTED,
+        "markdown.h1": f"bold {TEXT}",
+        "markdown.h2": f"bold {TEXT}",
+        "markdown.h3": f"bold {TEXT}",
+        "markdown.block_quote": MUTED,
+        "markdown.hr": LINE,
+    }
+)
 
 
 def current_style(widget: Any) -> ProviderStyle:
@@ -167,10 +203,10 @@ def _rgb(h: str) -> tuple[int, int, int]:
 
 def lerp(a: str, b: str, t: float) -> str:
     (r1, g1, b1), (r2, g2, b2) = _rgb(a), _rgb(b)
-    t = max(0.0, min(1.0, t))
-    return "#{:02X}{:02X}{:02X}".format(
-        round(r1 + (r2 - r1) * t), round(g1 + (g2 - g1) * t), round(b1 + (b2 - b1) * t)
-    )
+    red = round(r1 + (r2 - r1) * t)
+    green = round(g1 + (g2 - g1) * t)
+    blue = round(b1 + (b2 - b1) * t)
+    return f"#{red:02X}{green:02X}{blue:02X}"
 
 
 # --- Wordmark ----------------------------------------------------------------
@@ -381,14 +417,14 @@ class Thinking(Static):
     ) -> None:
         super().__init__("", **kwargs)
         self._custom_label = label
-        self._animate = animate
+        self._should_animate = animate
         self._ascii_only = ascii_only
         self._i = 0
 
     def on_mount(self) -> None:
         self._i = 0
         self._paint()
-        if self._animate and not REDUCED_MOTION and not os.environ.get("MYA_REDUCED_MOTION"):
+        if self._should_animate and not REDUCED_MOTION and not os.environ.get("MYA_REDUCED_MOTION"):
             self.set_interval(0.09, self._tick)
 
     def _tick(self) -> None:
@@ -397,7 +433,10 @@ class Thinking(Static):
 
     def _paint(self) -> None:
         s = current_style(self)
-        is_reduced = bool(REDUCED_MOTION or os.environ.get("MYA_REDUCED_MOTION") or not self._animate)
+        is_reduced = bool(
+            REDUCED_MOTION or os.environ.get("MYA_REDUCED_MOTION") or not self._should_animate
+        )
+
         frame = s.glyph if is_reduced else s.spinner[self._i % len(s.spinner)]
         if self._custom_label:
             phrase = self._custom_label

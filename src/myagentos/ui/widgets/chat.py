@@ -6,20 +6,16 @@ from datetime import datetime
 from typing import Any, Literal
 
 from rich.console import RenderableType
-from rich.table import Table
 from rich.text import Text
 from textual import on
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
-from textual.reactive import reactive
 from textual.widgets import Button, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from myagentos.ui.commands import CommandInfo, search_commands
-from myagentos.ui.session import Session
-from myagentos.ui.theme.animation import ASCII_SPINNER_FRAMES, UNICODE_SPINNER_FRAMES
 from myagentos.ui.theme.mya_theme import (
     Thinking,
     ThinkingIndicator,
@@ -27,8 +23,6 @@ from myagentos.ui.theme.mya_theme import (
     WelcomePanel,
 )
 from myagentos.ui.themes import COST_COLORS, Colors, Icons
-
-from rich.markdown import Markdown
 
 MessageRole = Literal["user", "mya", "agent", "tool", "system", "error"]
 
@@ -40,6 +34,17 @@ _ROLE_LABELS: dict[MessageRole, str] = {
     "system": "Sistema",
     "error": f"{Icons.FAIL} Error",
 }
+
+__all__ = [
+    "ChatMessage",
+    "CommandSuggestions",
+    "MessageRole",
+    "PromptInput",
+    "Thinking",
+    "ThinkingIndicator",
+    "Welcome",
+    "WelcomePanel",
+]
 
 
 class ChatMessage(Vertical):
@@ -62,7 +67,8 @@ class ChatMessage(Vertical):
         p_class = f"p-{provider}" if provider else ""
         css_role = "agent" if role in ("agent", "mya") else role
         classes = (
-            f"chat-message -{css_role} {css_role} -{role} {role} {p_class} {kwargs.pop('classes', '')}"
+            f"chat-message -{css_role} {css_role} -{role} {role} {p_class} "
+            f"{kwargs.pop('classes', '')}"
         ).strip()
         super().__init__(*args, classes=classes, **kwargs)
         self.role: MessageRole = role
@@ -73,8 +79,9 @@ class ChatMessage(Vertical):
 
     def compose(self) -> ComposeResult:
         if self.role not in ("system", "tool"):
+            role_label = _ROLE_LABELS.get(self.role, self.role)
             yield Static(
-                f"[b]{_ROLE_LABELS.get(self.role, self.role)}[/b]  [{Colors.DIM}]{self._timestamp}[/{Colors.DIM}]",
+                f"[b]{role_label}[/b]  [{Colors.DIM}]{self._timestamp}[/{Colors.DIM}]",
                 classes="chat-header",
             )
         with Horizontal(classes="chat-content-row"):

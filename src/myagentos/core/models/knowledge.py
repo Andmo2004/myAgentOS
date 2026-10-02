@@ -16,11 +16,11 @@ from myagentos.verification.guard import VerificationResult
 class NoteStatus(StrEnum):
     """Deterministic lifecycle state of a knowledge note (§22.5)."""
 
-    PROPOSED = "proposed"      # Staged in _inbox/, pending deterministic validation
-    VERIFIED = "verified"      # Anchors confirmed in commit, free of secrets
-    STALE = "stale"            # Content at anchor path has changed in repository
+    PROPOSED = "proposed"  # Staged in _inbox/, pending deterministic validation
+    VERIFIED = "verified"  # Anchors confirmed in commit, free of secrets
+    STALE = "stale"  # Content at anchor path has changed in repository
     SUPERSEDED = "superseded"  # Replaced by a more recent note or ADR
-    REJECTED = "rejected"      # Broken anchor or classified secret detected
+    REJECTED = "rejected"  # Broken anchor or classified secret detected
 
 
 class NoteProvenance(BaseModel):

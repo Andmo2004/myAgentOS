@@ -1,10 +1,11 @@
 """Docker rootless sandbox driver implementing strict Zone Z4 isolation (§11)."""
 
+import shlex
 import subprocess
 import time
 from pathlib import Path
 
-from myagentos.core.errors import SandboxExecutionError
+from myagentos.core.errors import SandboxExecutionError, SandboxUnavailableError
 from myagentos.sandbox.base import ExecutionLimits, ExecutionResult, SandboxDriver
 
 # Forbidden host directories that must NEVER be mounted into the sandbox (§11.1)
@@ -23,6 +24,21 @@ class DockerSandboxDriver(SandboxDriver):
 
     def __init__(self, image: str = "python:3.12-slim") -> None:
         self.image = image
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Checks if Docker daemon is installed and accessible (§11)."""
+        try:
+            res = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            return res.returncode == 0
+        except Exception:
+            return False
 
     def build_docker_args(
         self,
@@ -76,11 +92,17 @@ class DockerSandboxDriver(SandboxDriver):
 
     def run_command(
         self,
-        command: str,
+        command: str | list[str],
         worktree_path: Path,
         limits: ExecutionLimits | None = None,
         env_vars: dict[str, str] | None = None,
     ) -> ExecutionResult:
+        if not self.is_available():
+            raise SandboxUnavailableError(
+                "Docker daemon is not available or not running. "
+                "Execution in Zone Z4 requires an accessible Docker daemon (AGF-002)."
+            )
+
         active_limits = limits or ExecutionLimits()
         base_args = self.build_docker_args(
             worktree_path=worktree_path,
@@ -88,7 +110,16 @@ class DockerSandboxDriver(SandboxDriver):
             env_vars=env_vars,
         )
 
-        full_cmd = base_args + ["sh", "-c", command]
+        if isinstance(command, list):
+            cmd_args = list(command)
+        else:
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError:
+                cmd_args = command.strip().split()
+
+        # Run binary directly without sh -c to prevent command chaining (AGF-002)
+        full_cmd = base_args + cmd_args
         start_time = time.monotonic()
 
         try:

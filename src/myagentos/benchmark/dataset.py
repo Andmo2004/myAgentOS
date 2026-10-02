@@ -30,8 +30,7 @@ def get_stratified_dataset() -> list[BenchmarkTaskSpec]:
             expected_risk=RiskLevel.LOW,
             setup_files={
                 "src/utils.py": (
-                    "def format_name(name: str) -> str:\n"
-                    "    return name.strip().title()\n"
+                    "def format_name(name: str) -> str:\n    return name.strip().title()\n"
                 ),
             },
             description="Cosmetic docstring documentation fast-path",

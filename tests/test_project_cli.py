@@ -123,5 +123,3 @@ def test_cli_project_init_and_reset(capsys, project_service, tmp_path: Path, mon
     assert (target / "MYA.md.bak").is_file()
     assert "CLI test edit" in (target / "MYA.md.bak").read_text(encoding="utf-8")
     assert "## Rules" in (target / "MYA.md").read_text(encoding="utf-8")
-
-

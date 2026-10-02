@@ -319,5 +319,3 @@ def test_job_controller_execute_failure(tmp_path: Path) -> None:
     )
     assert state == JobState.CANCELLED
     assert state.is_terminal is True
-
-

@@ -22,6 +22,7 @@ class FailureCode(StrEnum):
     MERGE_CONFLICT = "MERGE_CONFLICT"
     REVIEW_REJECTED = "REVIEW_REJECTED"
     BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
+    CONFIG_ERROR = "CONFIG_ERROR"
     UNKNOWN = "UNKNOWN"
 
 
@@ -70,6 +71,10 @@ FAILURE_ACTION_MAP: dict[FailureCode, FailureRule] = {
         max_occurrences_per_job=1,
     ),
     FailureCode.POLICY_VIOLATION: FailureRule(
+        default_action=FailureAction.STOP,
+        max_occurrences_per_job=0,
+    ),
+    FailureCode.CONFIG_ERROR: FailureRule(
         default_action=FailureAction.STOP,
         max_occurrences_per_job=0,
     ),
@@ -152,4 +157,3 @@ class HealingDecision(BaseModel):
     fsm_event: EventName
     diagnostic_instructions: str
     retry_attempt: int
-

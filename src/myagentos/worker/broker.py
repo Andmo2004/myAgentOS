@@ -2,12 +2,24 @@
 
 import hashlib
 import re
+import shlex
 from fnmatch import fnmatch
 from pathlib import Path, PurePath
 from typing import Any
 
+from myagentos.core.errors import (
+    PathEscapeError,
+    PolicyViolationError,
+    SymlinkDisallowedError,
+)
 from myagentos.core.models.patch import FilePatch, PatchOperation, PatchSet
 from myagentos.core.models.token import CapabilityToken
+from myagentos.core.paths import (
+    safe_read_text,
+    safe_walk,
+    safe_write_text,
+    validate_safe_path,
+)
 from myagentos.policy.signals import DEFAULT_PROTECTED_PATHS
 from myagentos.sandbox.base import SandboxDriver
 from myagentos.worker.models import (
@@ -22,6 +34,22 @@ def _compute_sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _extract_diff_target_paths(diff_text: str) -> list[str]:
+    """Extracts target paths mentioned in diff headers (--- a/path and +++ b/path)."""
+    targets: list[str] = []
+    for line in diff_text.splitlines():
+        if line.startswith("--- ") or line.startswith("+++ "):
+            parts = line.split(maxsplit=1)
+            if len(parts) > 1:
+                raw_target = parts[1].split("\t")[0].strip()
+                # strip standard diff prefixes a/ and b/
+                if raw_target.startswith("a/") or raw_target.startswith("b/"):
+                    raw_target = raw_target[2:]
+                if raw_target and raw_target not in ("/dev/null", "dev/null"):
+                    targets.append(raw_target)
+    return targets
+
+
 class ToolBroker:
     """Mediates between the Worker model and the host/sandbox environment (§10.1).
 
@@ -34,8 +62,10 @@ class ToolBroker:
         token: CapabilityToken,
         sandbox: SandboxDriver | None = None,
         protected_paths: list[str] | None = None,
+        base_path: str | Path | None = None,
     ) -> None:
         self.worktree_path = Path(worktree_path).resolve()
+        self.base_path = Path(base_path).resolve() if base_path else self.worktree_path
         self.token = token
         self.sandbox = sandbox
         self.protected_paths = protected_paths or DEFAULT_PROTECTED_PATHS
@@ -99,7 +129,7 @@ class ToolBroker:
             )
 
     def tool_read_file(self, call_id: str, path: str) -> ToolResult:
-        """Reads a file within the token's read scope (§10.3)."""
+        """Reads a file within the token's read scope with physical containment (§10.3, AGF-003)."""
         if not path:
             return ToolResult(
                 call_id=call_id,
@@ -116,21 +146,26 @@ class ToolBroker:
                 error=f"Read permission denied for path '{path}' outside read scope",
             )
 
-        target = self.worktree_path / path
-        if not target.is_file():
+        try:
+            content = safe_read_text(self.worktree_path, path)
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.SUCCESS,
+                output=content,
+            )
+        except (PathEscapeError, SymlinkDisallowedError, PolicyViolationError) as e:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.PERMISSION_DENIED,
+                output="",
+                error=f"Path containment violation for '{path}': {e}",
+            )
+        except FileNotFoundError:
             return ToolResult(
                 call_id=call_id,
                 status=ToolStatus.ERROR,
                 output="",
                 error=f"File not found: '{path}'",
-            )
-
-        try:
-            content = target.read_text(encoding="utf-8", errors="ignore")
-            return ToolResult(
-                call_id=call_id,
-                status=ToolStatus.SUCCESS,
-                output=content,
             )
         except Exception as e:
             return ToolResult(
@@ -141,7 +176,7 @@ class ToolBroker:
             )
 
     def tool_search_symbols(self, call_id: str, query: str, path: str = ".") -> ToolResult:
-        """Searches for regex/symbols in files within read scope."""
+        """Searches for regex/symbols in files within read scope without following symlinks."""
         if not self._is_path_allowed(path, self.token.read_scope) and path != ".":
             return ToolResult(
                 call_id=call_id,
@@ -150,16 +185,6 @@ class ToolBroker:
                 error=f"Search path '{path}' outside read scope",
             )
 
-        target_dir = self.worktree_path / path
-        if not target_dir.exists():
-            return ToolResult(
-                call_id=call_id,
-                status=ToolStatus.ERROR,
-                output="",
-                error=f"Directory '{path}' not found",
-            )
-
-        results: list[str] = []
         try:
             pattern = re.compile(query, re.IGNORECASE)
         except re.error as e:
@@ -170,29 +195,42 @@ class ToolBroker:
                 error=f"Invalid regex query '{query}': {e}",
             )
 
-        # Scan files in read scope
-        for fpath in target_dir.rglob("*"):
-            if not fpath.is_file():
-                continue
-            rel = fpath.relative_to(self.worktree_path).as_posix()
-            if not self._is_path_allowed(rel, self.token.read_scope):
-                continue
-            try:
-                for idx, line in enumerate(
-                    fpath.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
-                ):
-                    if pattern.search(line):
-                        results.append(f"{rel}:{idx}: {line.strip()}")
-                        if len(results) >= 50:
-                            break
-            except Exception:
-                continue
+        results: list[str] = []
+        try:
+            for fpath, rel in safe_walk(self.worktree_path, path):
+                if not self._is_path_allowed(rel, self.token.read_scope):
+                    continue
+                try:
+                    lines = safe_read_text(self.worktree_path, rel).splitlines()
+                    for idx, line in enumerate(lines, 1):
+                        if pattern.search(line):
+                            results.append(f"{rel}:{idx}: {line.strip()}")
+                            if len(results) >= 50:
+                                break
+                except Exception:
+                    continue
+                if len(results) >= 50:
+                    break
+        except (PathEscapeError, SymlinkDisallowedError, PolicyViolationError) as e:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.PERMISSION_DENIED,
+                output="",
+                error=f"Search path violation for '{path}': {e}",
+            )
+        except FileNotFoundError:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.ERROR,
+                output="",
+                error=f"Directory '{path}' not found",
+            )
 
         output_str = "\n".join(results) if results else "No matches found."
         return ToolResult(call_id=call_id, status=ToolStatus.SUCCESS, output=output_str)
 
     def tool_run_command(self, call_id: str, command: str) -> ToolResult:
-        """Executes authorized command in the Code Sandbox (§10.1, §11)."""
+        """Executes structured command in Code Sandbox without shell chaining (AGF-002)."""
         if not command:
             return ToolResult(
                 call_id=call_id,
@@ -201,12 +239,46 @@ class ToolBroker:
                 error="Command argument is required",
             )
 
-        # Check against token execute scope
-        cmd_parts = command.strip().split()
-        binary = cmd_parts[0] if cmd_parts else ""
+        # Reject shell operators that allow command chaining, pipes, or redirection (AGF-002)
+        disallowed_shell_ops = [";", "&&", "||", "|", "&", ">", "<", "\n", "\r", "`", "$("]
+        if any(op in command for op in disallowed_shell_ops):
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.PERMISSION_DENIED,
+                output="",
+                error=(
+                    "Command contains forbidden shell chaining/redirection operators. "
+                    "Execution of chained commands is strictly prohibited (AGF-002)."
+                ),
+            )
 
+        try:
+            cmd_parts = shlex.split(command)
+        except ValueError as e:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.ERROR,
+                output="",
+                error=f"Invalid command syntax: {e}",
+            )
+
+        if not cmd_parts:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.ERROR,
+                output="",
+                error="Command argument is empty",
+            )
+
+        binary = PurePath(cmd_parts[0]).name
+
+        # Exact binary match against token execute scope; do NOT use prefix matching
         is_allowed = any(
-            binary == allowed or command.startswith(allowed) for allowed in self.token.execute_scope
+            binary == allowed
+            or cmd_parts[0] == allowed
+            or command.strip() == allowed
+            or cmd_parts == allowed.split()
+            for allowed in self.token.execute_scope
         )
         if not is_allowed:
             return ToolResult(
@@ -214,15 +286,15 @@ class ToolBroker:
                 status=ToolStatus.PERMISSION_DENIED,
                 output="",
                 error=(
-                    f"Execution permission denied for '{command}'. "
-                    f"Allowed binaries/prefixes: {self.token.execute_scope}"
+                    f"Execution permission denied for binary '{binary}'. "
+                    f"Allowed binaries: {self.token.execute_scope}"
                 ),
             )
 
-        # Execute inside sandbox driver
+        # Execute inside sandbox driver with structured arguments
         if self.sandbox:
             run_res = self.sandbox.run_command(
-                command=command,
+                command=cmd_parts,
                 worktree_path=self.worktree_path,
             )
             out = (
@@ -245,7 +317,7 @@ class ToolBroker:
         )
 
     def tool_write_file(self, call_id: str, path: str, content: str) -> ToolResult:
-        """Writes directly to a file within the token write scope (§10.3)."""
+        """Writes directly to a file with physical containment verification (§10.3, AGF-003)."""
         if not path:
             return ToolResult(
                 call_id=call_id,
@@ -270,15 +342,101 @@ class ToolBroker:
                 error=f"Write permission denied for '{path}' outside write scope",
             )
 
-        target = self.worktree_path / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        try:
+            bytes_written = safe_write_text(self.worktree_path, path, content, overwrite=True)
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.SUCCESS,
+                output=f"Successfully wrote {bytes_written} bytes to {path}",
+            )
+        except (PathEscapeError, SymlinkDisallowedError, PolicyViolationError) as e:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.PERMISSION_DENIED,
+                output="",
+                error=f"Path containment violation writing '{path}': {e}",
+            )
+        except Exception as e:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.ERROR,
+                output="",
+                error=f"Failed to write to '{path}': {e}",
+            )
 
-        return ToolResult(
-            call_id=call_id,
-            status=ToolStatus.SUCCESS,
-            output=f"Successfully wrote {len(content)} bytes to {path}",
-        )
+    def validate_proposal(self, proposal: PatchProposal) -> tuple[bool, str | None]:
+        """Validates all aspects of a PatchProposal BEFORE any file is modified (AGF-001)."""
+        if self.token.is_expired():
+            return False, "CapabilityToken is expired"
+
+        # Check total files limit
+        if len(proposal.files) > self.token.limits.max_files:
+            max_f = self.token.limits.max_files
+            return (
+                False,
+                f"Proposal exceeds max_files limit ({len(proposal.files)} > {max_f})",
+            )
+
+        # Validate EVERY file before any application begins
+        for f in proposal.files:
+            # 1. Target path logical containment and scope
+            try:
+                validate_safe_path(self.worktree_path, f.path, allow_symlinks=False)
+            except Exception as e:
+                return False, f"Invalid target path '{f.path}': {e}"
+
+            if self._is_protected(f.path):
+                return False, f"Patch proposal modifies protected path '{f.path}' (§13.2)"
+
+            if not self._is_path_allowed(f.path, self.token.write_scope):
+                return False, f"Patch proposal contains path '{f.path}' outside write scope"
+
+            # 2. Rename operation source validation
+            if f.operation == PatchOperation.RENAME:
+                if not f.old_path:
+                    return False, f"Rename operation missing old_path for '{f.path}'"
+                try:
+                    validate_safe_path(
+                        self.worktree_path, f.old_path, allow_symlinks=False, must_exist=True
+                    )
+                except Exception as e:
+                    return False, f"Invalid rename source '{f.old_path}': {e}"
+
+                if self._is_protected(f.old_path):
+                    return False, f"Rename source '{f.old_path}' is a protected path"
+
+                if not self._is_path_allowed(f.old_path, self.token.write_scope):
+                    return False, f"Rename source '{f.old_path}' is outside write scope"
+
+            # 3. Create operation target check
+            if f.operation == PatchOperation.CREATE:
+                target = self.worktree_path / f.path
+                if target.exists():
+                    return (
+                        False,
+                        f"Cannot CREATE existing file '{f.path}' without explicit overwrite",
+                    )
+
+            # 4. Unified diff destination analysis (AGF-001)
+            if f.content.startswith("---") or "\n@@" in f.content:
+                diff_targets = _extract_diff_target_paths(f.content)
+                for dt in diff_targets:
+                    # Clean trailing parts
+                    clean_dt = dt.strip("/")
+                    clean_target = f.path.strip("/")
+                    clean_old = f.old_path.strip("/") if f.old_path else None
+                    if clean_dt != clean_target and clean_dt != clean_old:
+                        return (
+                            False,
+                            f"Diff headers for '{f.path}' target unauthorized '{dt}' (AGF-001)",
+                        )
+                    # Check that header target does not contain traversal
+                    try:
+                        validate_safe_path(self.worktree_path, dt, allow_symlinks=False)
+                    except Exception as e:
+                        return False, f"Diff header path '{dt}' invalid: {e}"
+
+        return True, None
 
     def tool_propose_patch(self, call_id: str, args: dict[str, Any]) -> ToolResult:
         """Validates and constructs a sealed PatchSet from proposal (§10.4, §12)."""
@@ -292,22 +450,14 @@ class ToolBroker:
                 error=f"Invalid patch proposal schema: {e}",
             )
 
-        # Validate write permissions on all proposed files
-        for f in proposal.files:
-            if self._is_protected(f.path):
-                return ToolResult(
-                    call_id=call_id,
-                    status=ToolStatus.PERMISSION_DENIED,
-                    output="",
-                    error=f"Patch proposal modifies protected path '{f.path}' (§13.2)",
-                )
-            if not self._is_path_allowed(f.path, self.token.write_scope):
-                return ToolResult(
-                    call_id=call_id,
-                    status=ToolStatus.PERMISSION_DENIED,
-                    output="",
-                    error=f"Patch proposal contains path '{f.path}' outside write scope",
-                )
+        valid, err = self.validate_proposal(proposal)
+        if not valid:
+            return ToolResult(
+                call_id=call_id,
+                status=ToolStatus.PERMISSION_DENIED,
+                output="",
+                error=err or "Proposal validation failed",
+            )
 
         msg = f"Patch proposal accepted for {len(proposal.files)} files: {proposal.description}"
         return ToolResult(
@@ -325,10 +475,22 @@ class ToolBroker:
         file_patches: list[FilePatch] = []
 
         for item in proposal.files:
-            target = self.worktree_path / item.path
+            check_base = getattr(self, "base_path", self.worktree_path)
+            target = check_base / item.path
             before_hash = ""
             if target.exists() and item.operation in (PatchOperation.MODIFY, PatchOperation.DELETE):
-                before_hash = _compute_sha256(target.read_text(encoding="utf-8", errors="ignore"))
+                try:
+                    before_hash = _compute_sha256(safe_read_text(check_base, item.path))
+                except Exception:
+                    before_hash = ""
+            elif (self.worktree_path / item.path).exists() and item.operation in (
+                PatchOperation.MODIFY,
+                PatchOperation.DELETE,
+            ):
+                try:
+                    before_hash = _compute_sha256(safe_read_text(self.worktree_path, item.path))
+                except Exception:
+                    before_hash = ""
 
             after_hash = ""
             if item.operation in (PatchOperation.CREATE, PatchOperation.MODIFY):

@@ -35,7 +35,7 @@ class SandboxDriver(ABC):
     @abstractmethod
     def run_command(
         self,
-        command: str,
+        command: str | list[str],
         worktree_path: Path,
         limits: ExecutionLimits | None = None,
         env_vars: dict[str, str] | None = None,

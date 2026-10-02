@@ -34,9 +34,7 @@ class ObservabilityService:
         self.event_store = event_store or EventStore()
         self.display_config = display_config or AgentDisplayConfig()
 
-    def get_token_breakdown(
-        self, job_id: str | None = None
-    ) -> dict[str, dict[str, Any]]:
+    def get_token_breakdown(self, job_id: str | None = None) -> dict[str, dict[str, Any]]:
         """Calculates token and cost consumption broken down by agent role."""
         breakdown: dict[str, dict[str, Any]] = {
             "Planner": {"calls": 0, "input": 0, "output": 0, "cost": 0.0},
@@ -74,9 +72,7 @@ class ObservabilityService:
 
         return breakdown
 
-    def get_agent_activities(
-        self, job_id: str | None = None
-    ) -> list[AgentActivitySnapshot]:
+    def get_agent_activities(self, job_id: str | None = None) -> list[AgentActivitySnapshot]:
         """Gathers agent telemetry and state with friendly display names (§8, §9)."""
         breakdown = self.get_token_breakdown(job_id)
 
@@ -150,7 +146,7 @@ class ObservabilityService:
         model_id: str | None = None,
         provider: str | None = None,
     ) -> str:
-        """Renders session status, credential identity, token distribution and budget summary (§6.1, §16)."""
+        """Renders session status, identity, token distribution and budget summary (§6.1, §16)."""
         job_id = session.current_job_id if session else None
         proj_name = session.repository if session and session.repository else "none"
         mode = session.active_mode if session else "normal"
@@ -162,7 +158,9 @@ class ObservabilityService:
         total_cost = sum(b["cost"] for b in breakdown.values())
         estimated_remaining_cost = max(0.0, (remaining_budget / total_budget) * 0.5)
 
-        model_name = model_id or (getattr(session, "model_id", None) if session else None) or "mock-mya"
+        model_name = (
+            model_id or (getattr(session, "model_id", None) if session else None) or "mock-mya"
+        )
         resolved_provider = provider
         if not resolved_provider:
             if model_name.startswith("mock"):
@@ -181,7 +179,7 @@ class ObservabilityService:
         lines = [
             format_command_badge("/info") + " [bold]SESSION INFORMATION[/bold]",
             "",
-            "[bold cyan]── MYA & MODEL ───────────────────────────────────────────────[/bold cyan]",
+            "[bold cyan]── MYA & MODEL ──────────────────────────[/bold cyan]",
             f"  Model:       [bold cyan]{model_name}[/bold cyan]",
             f"  Deployment:  [bold]{deployment_type}[/bold]",
             f"  Provider:    [bold]{resolved_provider.capitalize()}[/bold]",
@@ -194,11 +192,16 @@ class ObservabilityService:
                 is_valid = str(profile.status).lower() in ("valid", "credentialstatus.valid")
                 status_icon = "✓" if is_valid else "✗"
                 status_style = "bold green" if is_valid else "bold red"
-                status_name = profile.status.name if hasattr(profile.status, "name") else str(profile.status).upper()
+                status_name = (
+                    profile.status.name
+                    if hasattr(profile.status, "name")
+                    else str(profile.status).upper()
+                )
+                status_display = f"[{status_style}]{status_icon} {status_name}[/{status_style}]"
                 lines.extend(
                     [
-                        "[bold cyan]── CREDENTIAL ────────────────────────────────────────────────[/bold cyan]",
-                        f"  Status:      [{status_style}]{status_icon} {status_name}[/{status_style}]",
+                        "[bold cyan]── CREDENTIAL ───────────────────────────[/bold cyan]",
+                        f"  Status:      {status_display}",
                         f"  Source:      {profile.source}",
                         f"  Profile:     {profile.credential_id}",
                         f"  Fingerprint: [dim]{profile.fingerprint}[/dim]",
@@ -223,13 +226,13 @@ class ObservabilityService:
 
         lines.extend(
             [
-                "[bold cyan]── SESSION ───────────────────────────────────────────────────[/bold cyan]",
+                "[bold cyan]── SESSION ──────────────────────────────[/bold cyan]",
                 f"  Project: [bold]{proj_name}[/bold]",
                 "  Mya:     ready",
                 f"  Job:     {job_id or 'none'}",
                 f"  Mode:    {mode}",
                 "",
-                "[bold cyan]── TOKENS ────────────────────────────────────────────────────[/bold cyan]",
+                "[bold cyan]── TOKENS ───────────────────────────────[/bold cyan]",
                 f"  Budget remaining: [bold green]{remaining_budget:,}[/bold green]",
                 f"  Used:             [bold]{total_used:,}[/bold] / {total_budget:,}",
                 "",
@@ -261,9 +264,7 @@ class ObservabilityService:
 
         for s in snapshots:
             k_in = (
-                f"{s.input_tokens / 1000:.1f}k"
-                if s.input_tokens >= 1000
-                else str(s.input_tokens)
+                f"{s.input_tokens / 1000:.1f}k" if s.input_tokens >= 1000 else str(s.input_tokens)
             )
             k_out = (
                 f"{s.output_tokens / 1000:.1f}k"
@@ -283,9 +284,7 @@ class ObservabilityService:
 
         return "\n".join(lines)
 
-    def render_monitor(
-        self, job_id: str | None = None, session: Session | None = None
-    ) -> str:
+    def render_monitor(self, job_id: str | None = None, session: Session | None = None) -> str:
         """Renders live monitoring view of agents and affected files (§9.1, §28)."""
         proj_name = session.repository if session and session.repository else "unknown"
         job_display = job_id or "idle"

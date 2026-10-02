@@ -387,8 +387,11 @@ class _CombinedMemoryStore:
         user_id = kwargs.get("user_id")
         project_id = kwargs.get("project_id")
         session_id = kwargs.get("session_id")
-        query = str(kwargs.get("query", ""))
-        limit = int(kwargs.get("limit", 8))
+        query_val = kwargs.get("query", "")
+        query = str(query_val) if query_val is not None else ""
+        limit_val = kwargs.get("limit", 8)
+        limit = int(limit_val) if isinstance(limit_val, (int, str, float)) else 8
+
         records = self.local_store.retrieve(
             user_id=user_id if isinstance(user_id, str) else None,
             project_id=None,

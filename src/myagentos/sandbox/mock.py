@@ -1,5 +1,8 @@
 """Mock and subprocess sandbox driver for fast local execution and tests without Docker."""
 
+import os
+import shlex
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -8,9 +11,12 @@ from myagentos.sandbox.base import ExecutionLimits, ExecutionResult, SandboxDriv
 
 
 class MockSandboxDriver(SandboxDriver):
-    """In-process and subprocess sandbox driver for local macOS test suites."""
+    """In-process and subprocess sandbox driver for local macOS test suites.
 
-    def __init__(self, use_real_subprocess: bool = True) -> None:
+    By default, this driver is purely simulated and does NOT execute host processes (AGF-002).
+    """
+
+    def __init__(self, use_real_subprocess: bool = False) -> None:
         self.use_real_subprocess = use_real_subprocess
         self.mocked_commands: dict[str, ExecutionResult] = {}
         self.executed_commands: list[str] = []
@@ -34,17 +40,31 @@ class MockSandboxDriver(SandboxDriver):
 
     def run_command(
         self,
-        command: str,
+        command: str | list[str],
         worktree_path: Path,
         limits: ExecutionLimits | None = None,
         env_vars: dict[str, str] | None = None,
     ) -> ExecutionResult:
-        self.executed_commands.append(command)
+        if isinstance(command, list):
+            cmd_str = " ".join(shlex.quote(c) for c in command)
+            cmd_args = list(command)
+        else:
+            cmd_str = command
+            try:
+                cmd_args = shlex.split(command)
+            except ValueError:
+                cmd_args = command.strip().split()
+
+        self.executed_commands.append(cmd_str)
         active_limits = limits or ExecutionLimits()
 
         # Check registered mocks first
         for prefix, result in self.mocked_commands.items():
-            if command.startswith(prefix) or command == prefix:
+            if (
+                cmd_str.startswith(prefix)
+                or cmd_str == prefix
+                or (cmd_args and cmd_args[0] == prefix)
+            ):
                 return result
 
         if not self.use_real_subprocess:
@@ -57,36 +77,57 @@ class MockSandboxDriver(SandboxDriver):
             )
 
         start_time = time.monotonic()
-        try:
-            # Clean minimal environment to prevent secret leaking
-            env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"}
-            if env_vars:
-                env.update(env_vars)
+        # Clean minimal environment to prevent secret leaking
+        env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"}
+        if env_vars:
+            env.update(env_vars)
 
-            res = subprocess.run(
-                command,
-                shell=True,
+        try:
+            # Use structured command without shell interpretation (AGF-002)
+            # Use start_new_session=True to establish a new process group for clean termination
+            proc = subprocess.Popen(
+                cmd_args,
+                shell=False,
                 cwd=str(worktree_path),
                 env=env,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=active_limits.timeout_seconds,
-                check=False,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = proc.communicate(timeout=active_limits.timeout_seconds)
+            except subprocess.TimeoutExpired:
+                # Terminate entire process group on timeout (AGF-002)
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
+                stdout, stderr = proc.communicate()
+                duration = time.monotonic() - start_time
+                return ExecutionResult(
+                    exit_code=-1,
+                    stdout=stdout[:100_000] if stdout else "",
+                    stderr="Subprocess execution timed out",
+                    duration_seconds=duration,
+                    timed_out=True,
+                )
+
             duration = time.monotonic() - start_time
+            # Cap output to avoid memory exhaustion
             return ExecutionResult(
-                exit_code=res.returncode,
-                stdout=res.stdout,
-                stderr=res.stderr,
+                exit_code=proc.returncode,
+                stdout=stdout[:500_000] if stdout else "",
+                stderr=stderr[:500_000] if stderr else "",
                 duration_seconds=duration,
                 timed_out=False,
             )
-        except subprocess.TimeoutExpired as e:
+        except Exception as ex:
             duration = time.monotonic() - start_time
             return ExecutionResult(
-                exit_code=-1,
-                stdout=e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or ""),
-                stderr="Mock execution timed out",
+                exit_code=1,
+                stdout="",
+                stderr=f"Subprocess execution error: {ex}",
                 duration_seconds=duration,
-                timed_out=True,
+                timed_out=False,
             )

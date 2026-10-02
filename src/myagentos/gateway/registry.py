@@ -51,4 +51,3 @@ class ModelRegistry:
             if entry_p == p:
                 results.append(entry)
         return results
-

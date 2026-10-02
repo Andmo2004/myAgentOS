@@ -5,6 +5,7 @@ import json
 import sys
 from datetime import UTC
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 from rich.table import Table
@@ -215,11 +216,7 @@ def cmd_benchmark(
         defense = (
             "Protected Test Defended"
             if m.protected_tampering_blocked
-            else (
-                "Policy Violation Blocked"
-                if m.policy_violation_caught
-                else "Normal Completion"
-            )
+            else ("Policy Violation Blocked" if m.policy_violation_caught else "Normal Completion")
         )
         detail_table.add_row(
             res.task.task_id,
@@ -422,11 +419,36 @@ def cmd_run(
     console.print(f"Target Repository: [green]{root}[/green]")
     console.print(f"Task Prompt: [magenta]{prompt}[/magenta]\n")
 
+    plan_cb = None
+    diff_cb = None
+    if not auto_approve and sys.stdin.isatty():
+        from rich.prompt import Confirm
+
+        def cli_plan_approval(plan_id: str, plan_spec: Any) -> bool:
+            console.print(f"\n[bold yellow]⚠️  Plan Approval Requested for {plan_id}[/bold yellow]")
+            targets = ", ".join(plan_spec.all_targeted_paths()) or "none"
+            console.print(f"Targeted files: [cyan]{targets}[/cyan]")
+            return Confirm.ask("Do you approve this execution plan?", default=False)
+
+        def cli_diff_approval(job_id: str, patch_set: Any) -> bool:
+            console.print(f"\n[bold yellow]⚠️  Diff Approval Requested for {job_id}[/bold yellow]")
+            console.print(f"Files modified: [cyan]{patch_set.total_files}[/cyan]")
+            for f in patch_set.files:
+                console.print(f"  [{f.operation.value}] {f.path}")
+            return Confirm.ask(
+                "Do you approve merging these changes into the repository?", default=False
+            )
+
+        plan_cb = cli_plan_approval
+        diff_cb = cli_diff_approval
+
     config = PipelineConfig(
         repo_root=root,
         model_id=model_id,
         auto_approve=auto_approve,
         use_worktree=True,
+        approval_callback=plan_cb,
+        diff_approval_callback=diff_cb,
     )
     orchestrator = PipelineOrchestrator(config=config)
     result = orchestrator.run(prompt)
@@ -505,9 +527,7 @@ def cmd_project(
     mgr = ProjectManagerService()
 
     if action == "list":
-        projects = mgr.list_projects(
-            filter_criteria=ProjectFilter(query=search, tag=tag)
-        )
+        projects = mgr.list_projects(filter_criteria=ProjectFilter(query=search, tag=tag))
         if json_output:
             console.print(json.dumps([p.model_dump(mode="json") for p in projects], indent=2))
             return
@@ -534,8 +554,7 @@ def cmd_project(
         try:
             proj = mgr.add_project(target_path, name=name)
             console.print(
-                f"[bold green]✓ Project added:[/bold green] {proj.name} "
-                f"({proj.project_id})"
+                f"[bold green]✓ Project added:[/bold green] {proj.name} ({proj.project_id})"
             )
             tags = " ".join(f"[{t.label}]" for t in proj.visible_tags)
             console.print(f"  Visible tags: [magenta]{tags}[/magenta]")
@@ -554,7 +573,9 @@ def cmd_project(
             res = mgr.ensure_project_mya_environment(target_path, project_name=name)
 
         if res.get("status") == "error":
-            console.print(f"[bold red]✗ Failed to initialize project:[/bold red] {res.get('reason')}")
+            console.print(
+                f"[bold red]✗ Failed to initialize project:[/bold red] {res.get('reason')}"
+            )
             sys.exit(1)
 
         action_desc = "reinicializada" if is_reset else "verificada"
@@ -578,8 +599,7 @@ def cmd_project(
         try:
             proj = mgr.create_project(name=target, path=new_dir)
             console.print(
-                f"[bold green]✓ Project created:[/bold green] {proj.name} "
-                f"({proj.project_id})"
+                f"[bold green]✓ Project created:[/bold green] {proj.name} ({proj.project_id})"
             )
             console.print(f"  Location: {proj.path}")
         except Exception as exc:
@@ -589,9 +609,7 @@ def cmd_project(
 
     if action == "clone":
         if not target or not secondary:
-            console.print(
-                "[bold red]✗ URL and destination required for 'project clone'[/bold red]"
-            )
+            console.print("[bold red]✗ URL and destination required for 'project clone'[/bold red]")
             sys.exit(1)
         try:
             proj = mgr.clone_repository(url=target, destination=secondary, name=name)
@@ -750,9 +768,7 @@ def cmd_mya(
         reg = ThemeRegistry.get_instance()
         if not argument:
             avail = ", ".join(t.name for t in reg.list_themes())
-            console.print(
-                f"[bold]Active Theme:[/bold] {reg.active_theme.name}\nAvailable: {avail}"
-            )
+            console.print(f"[bold]Active Theme:[/bold] {reg.active_theme.name}\nAvailable: {avail}")
         else:
             try:
                 th = reg.set_active_theme(argument)
@@ -790,7 +806,12 @@ def cmd_mya(
         from myagentos.projects.service import ProjectManagerService
 
         root = Path(repo_path).resolve()
-        is_reset = cmd == "/reset" or argument.strip().lower() in ("reset", "force", "--reset", "--force")
+        is_reset = cmd == "/reset" or argument.strip().lower() in (
+            "reset",
+            "force",
+            "--reset",
+            "--force",
+        )
         if is_reset:
             res = ProjectManagerService.reset_project_mya_environment(root)
         else:

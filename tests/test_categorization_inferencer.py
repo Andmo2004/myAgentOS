@@ -19,9 +19,7 @@ def test_infer_domain_accepted() -> None:
     )
 
     inferencer = SemanticInferencer(gateway=mock_gateway)
-    inf = inferencer.infer_domain(
-        "payment-service", ["Python"], ["API"], ["payments", "webhooks"]
-    )
+    inf = inferencer.infer_domain("payment-service", ["Python"], ["API"], ["payments", "webhooks"])
 
     assert inf.status == "accepted"
     assert inf.value == "Fintech"
@@ -34,8 +32,7 @@ def test_infer_domain_abstain_low_confidence() -> None:
     mock_gateway = MagicMock(spec=ModelGateway)
     mock_gateway.generate.return_value = LLMResponse(
         content=(
-            '{"domain": "E-commerce", "confidence": 0.45, '
-            '"evidence": [], "status": "accepted"}'
+            '{"domain": "E-commerce", "confidence": 0.45, "evidence": [], "status": "accepted"}'
         ),
         model_id="mock-categorizer",
     )

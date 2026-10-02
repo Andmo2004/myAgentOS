@@ -11,9 +11,9 @@ Validates:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,7 +22,6 @@ from myagentos.gateway import (
     CredentialProfile,
     CredentialStatus,
     DiscoveredModel,
-    DiscoveredModelSet,
     DiscoveryCache,
     EffectiveModelSet,
     IdentityInfo,
@@ -39,10 +38,10 @@ from myagentos.gateway.openai_adapter import OpenAIAdapter
 from myagentos.mya.commands.observability import ObservabilityService
 from myagentos.ui.app import MyaApp
 
-
 # ============================================================================
 # 1. Fingerprint & Credentials Tests
 # ============================================================================
+
 
 def test_derive_fingerprint_deterministic_and_safe() -> None:
     secret = "sk-proj-supersecretkey1234567890"
@@ -86,6 +85,7 @@ def test_credential_profile_and_identity_models() -> None:
 # ============================================================================
 # 2. DiscoveryCache & EffectiveModelSet Tests
 # ============================================================================
+
 
 def test_discovery_cache_ttl_and_invalidation() -> None:
     cache = DiscoveryCache(default_ttl_seconds=300)
@@ -133,6 +133,7 @@ def test_effective_model_set_availability() -> None:
 # ============================================================================
 # 3. Provider Adapters Tests (Mock, OpenAI, Claude, Gemini)
 # ============================================================================
+
 
 def test_mock_adapter_validation_and_discovery() -> None:
     adapter = MockProviderAdapter()
@@ -196,7 +197,7 @@ def test_claude_adapter_validation_and_discovery_mocked() -> None:
     mock_model = MagicMock()
     mock_model.id = "claude-3-5-sonnet-20241022"
     mock_model.display_name = "Claude 3.5 Sonnet"
-    mock_model.created_at = datetime.now(timezone.utc)
+    mock_model.created_at = datetime.now(UTC)
 
     mock_page = MagicMock()
     mock_page.data = [mock_model]
@@ -233,6 +234,7 @@ def test_gemini_adapter_validation_and_discovery_mocked() -> None:
 # ============================================================================
 # 4. ModelGateway Reconciliation & Cache Invalidation Tests
 # ============================================================================
+
 
 def test_gateway_effective_model_set_reconciliation() -> None:
     registry = ModelRegistry()
@@ -317,6 +319,7 @@ def test_gateway_auto_invalidates_cache_on_401() -> None:
 # 5. /info Observability Service Tests
 # ============================================================================
 
+
 def test_observability_render_info_with_credential_metadata() -> None:
     gateway = ModelGateway()
     adapter = MockProviderAdapter()
@@ -338,9 +341,7 @@ def test_observability_render_info_with_credential_metadata() -> None:
 def test_observability_render_info_no_identity_inferred() -> None:
     # When provider exposes no identity, never infer OS username
     mock_adapter = MockProviderAdapter()
-    mock_adapter.validate_credential = MagicMock(
-        return_value=(CredentialStatus.VALID, None, None)
-    )
+    mock_adapter.validate_credential = MagicMock(return_value=(CredentialStatus.VALID, None, None))
     gateway = ModelGateway()
     gateway.register_adapter("mock", mock_adapter)
 
@@ -353,6 +354,7 @@ def test_observability_render_info_no_identity_inferred() -> None:
 # ============================================================================
 # 6. UI Commands (/model, /model refresh, /model <query>, /key) Tests
 # ============================================================================
+
 
 @pytest.mark.asyncio
 async def test_ui_model_and_discovery_commands() -> None:

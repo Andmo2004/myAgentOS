@@ -7,7 +7,7 @@ import html
 import logging
 from datetime import UTC, datetime
 
-from myagentos.memory.models import MemoryContext, MemoryLimits, MemoryRecord
+from myagentos.memory.models import MemoryContext, MemoryLimits, MemoryRecord, MemoryScope
 from myagentos.memory.policy import MemoryPolicy
 from myagentos.memory.store import MemoryStore
 
@@ -47,7 +47,7 @@ class MemoryContextBuilder:
         )
         # Queries about preferences or recent decisions shift priority without mixing scopes.
         lower = user_message.lower()
-        scope_order = ("session", "project", "user")
+        scope_order: tuple[MemoryScope, ...] = ("session", "project", "user")
         if any(word in lower for word in ("prefiero", "prefieres", "idioma", "respuestas")):
             scope_order = ("user", "session", "project")
         elif any(

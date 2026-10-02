@@ -37,23 +37,35 @@ class OpenAIAdapter(ProviderAdapter):
             _ = client.models.list(timeout=5.0)
             org = getattr(client, "organization", None)
             proj = getattr(client, "project", None)
-            identity = IdentityInfo(
-                principal_name="api_user",
-                principal_type="api_key",
-                organization=org or None,
-                project=proj or None,
-                quota_scope=proj or org or None,
-            ) if (org or proj) else None
+            identity = (
+                IdentityInfo(
+                    principal_name="api_user",
+                    principal_type="api_key",
+                    organization=org or None,
+                    project=proj or None,
+                    quota_scope=proj or org or None,
+                )
+                if (org or proj)
+                else None
+            )
             return CredentialStatus.VALID, None, identity
         except Exception as e:
             err_str = str(e).lower()
             if "401" in err_str or "invalid" in err_str or "unauthorized" in err_str:
                 return CredentialStatus.INVALID, "La API key no es válida o fue revocada", None
             if "403" in err_str or "permission" in err_str:
-                return CredentialStatus.INSUFFICIENT_SCOPE, "La API key no tiene permisos suficientes", None
+                return (
+                    CredentialStatus.INSUFFICIENT_SCOPE,
+                    "La API key no tiene permisos suficientes",
+                    None,
+                )
             if "429" in err_str or "rate limit" in err_str:
                 return CredentialStatus.RATE_LIMITED, "Límite de peticiones alcanzado", None
-            return CredentialStatus.PROVIDER_UNAVAILABLE, "Proveedor no disponible o sin conexión", None
+            return (
+                CredentialStatus.PROVIDER_UNAVAILABLE,
+                "Proveedor no disponible o sin conexión",
+                None,
+            )
 
     def discover_models(self) -> list[DiscoveredModel]:
         """Discovers accessible models from OpenAI (§8)."""

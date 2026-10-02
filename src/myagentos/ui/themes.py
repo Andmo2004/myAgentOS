@@ -17,6 +17,14 @@ from myagentos.ui.theme import (
     VisualStatus,
     get_status_symbol,
 )
+from myagentos.ui.theme.mya_theme import (
+    MUTED as MYA_MUTED,
+)
+from myagentos.ui.theme.mya_theme import (
+    RED,
+    SAGE,
+    SAND,
+)
 
 
 # Status icons — clean, character-driven glyphs
@@ -34,19 +42,6 @@ class Icons:
     DOT = "·"
     BAR = "▎"
     COPY = "⧉"
-
-
-from myagentos.ui.theme.mya_theme import (
-    INK,
-    LINE,
-    MUTED as MYA_MUTED,
-    PANEL,
-    RED,
-    SAGE,
-    SAND,
-    SURFACE,
-    TEXT,
-)
 
 
 # Color palette for Rich markup (Truecolor Mya v2 Palette)

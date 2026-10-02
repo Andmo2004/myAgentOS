@@ -174,8 +174,7 @@ class JobController:
                 conflicts.append(f"{changed_file} (protected path)")
                 continue
             if any(
-                fnmatch(changed_file, pat) or fnmatch(fname, pat)
-                for pat in active_config_patterns
+                fnmatch(changed_file, pat) or fnmatch(fname, pat) for pat in active_config_patterns
             ):
                 conflicts.append(f"{changed_file} (config/manifest)")
                 continue

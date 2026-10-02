@@ -1,8 +1,8 @@
 """Tests for canonical CommandRegistry invariants (§49-§55, §74-§75)."""
 
 from myagentos.mya.commands.models import CommandCategory
-from myagentos.mya.commands.registry import COMMAND_REGISTRY, CommandRegistry
-from myagentos.ui.commands import AVAILABLE_COMMANDS, COMMAND_CATALOG, get_completions
+from myagentos.mya.commands.registry import COMMAND_REGISTRY
+from myagentos.ui.commands import AVAILABLE_COMMANDS, COMMAND_CATALOG
 
 
 def test_command_registry_canonical_names_unique():
@@ -19,9 +19,9 @@ def test_every_visible_command_has_valid_handler():
     valid_handler_prefixes = ("ui.", "mya.")
     for cmd in COMMAND_REGISTRY.visible_commands():
         assert cmd.handler is not None, f"Command {cmd.name} has no handler"
-        assert any(
-            cmd.handler.startswith(p) for p in valid_handler_prefixes
-        ), f"Command {cmd.name} has invalid handler: {cmd.handler}"
+        assert any(cmd.handler.startswith(p) for p in valid_handler_prefixes), (
+            f"Command {cmd.name} has invalid handler: {cmd.handler}"
+        )
 
     missing = COMMAND_REGISTRY.validate_handlers(
         lambda h: any(h.startswith(p) for p in valid_handler_prefixes)

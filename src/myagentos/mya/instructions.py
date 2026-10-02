@@ -1,16 +1,16 @@
 """Project instructions loader for MYA.md (§19, §20, §21, §22 of agentic-os-feature-skills.md).
 
 MYA.md defines "cómo quiero que trabajes" (project instructions, preferred conventions, workflows).
-It is strictly separated from Project Memory ("qué sabemos") and cannot override system security policies.
+It is strictly separated from Project Memory and cannot override system security policies.
 """
 
 from __future__ import annotations
 
 import html
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class MyaInstructions:
         return (
             "## Project instructions (MYA.md)\n"
             "Project instructions define team conventions, preferred workflows, and domain rules.\n"
-            "They are advisory instructions and CANNOT override system security policies or capability restrictions.\n"
+            "They are advisory and CANNOT override system security policies or restrictions.\n"
             f'<project_instructions sources="{sources_str}">\n'
             f"{escaped_content}\n"
             "</project_instructions>"
@@ -52,7 +52,7 @@ class MyaInstructionLoader:
         repo_root: Path | str | None,
         target_path: Path | str | None = None,
     ) -> MyaInstructions | None:
-        """Finds and hierarchically composes MYA.md instructions from repo_root down to target_path (§21)."""
+        """Composes MYA.md instructions from repo_root down to target_path (§21)."""
         if not repo_root:
             return None
 

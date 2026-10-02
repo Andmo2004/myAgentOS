@@ -85,8 +85,7 @@ class CompiledContext(BaseModel):
     stable_prefix: str = Field(
         ...,
         description=(
-            "Static instructions, repo map, and type signatures "
-            "optimized for prompt caching (§9.7)"
+            "Static instructions, repo map, and type signatures optimized for prompt caching (§9.7)"
         ),
     )
     variable_suffix: str = Field(

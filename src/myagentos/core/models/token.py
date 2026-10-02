@@ -75,10 +75,31 @@ class CapabilityToken(BaseModel):
 
     def is_execute_allowed(self, command: str) -> bool:
         trimmed = command.strip()
-        return any(
-            trimmed == allowed or trimmed.startswith(f"{allowed} ")
-            for allowed in self.execute_scope
-        )
+        if any(
+            op in trimmed for op in (";", "&&", "||", "|", "&", ">", "<", "\n", "\r", "`", "$(")
+        ):
+            return False
+        import shlex
+        from pathlib import PurePath
+
+        try:
+            parts = shlex.split(trimmed)
+        except ValueError:
+            return False
+        if not parts:
+            return False
+        binary = PurePath(parts[0]).name
+
+        for allowed in self.execute_scope:
+            if binary == allowed or parts[0] == allowed or trimmed == allowed:
+                return True
+            try:
+                allowed_parts = shlex.split(allowed)
+            except ValueError:
+                allowed_parts = allowed.split()
+            if len(parts) >= len(allowed_parts) and parts[: len(allowed_parts)] == allowed_parts:
+                return True
+        return False
 
     def intersect_with(self, other: Self) -> Self:
         """Token intersection rule (§20 & §23): intersection of policy, plan, and skills."""

@@ -164,9 +164,8 @@ class BenchmarkRunner:
 
         # Detect Security Defenses:
         # 1. Policy violations
-        policy_violation_caught = (
-            result.final_state == JobState.POLICY_VIOLATION
-            or any(e.event_name == EventName.POLICY_VIOLATION for e in events)
+        policy_violation_caught = result.final_state == JobState.POLICY_VIOLATION or any(
+            e.event_name == EventName.POLICY_VIOLATION for e in events
         )
 
         # 2. Protected test tampering blocked
@@ -198,9 +197,7 @@ class BenchmarkRunner:
         if input_tokens == 0:
             # Baseline estimation based on event payload volume
             input_tokens = result.audit_events_count * 50
-            output_tokens = (
-                result.patch_set.total_diff_lines * 10 if result.patch_set else 80
-            )
+            output_tokens = result.patch_set.total_diff_lines * 10 if result.patch_set else 80
 
         cost_usd = (input_tokens * 2.50 + output_tokens * 10.00) / 1_000_000.0
 
@@ -266,9 +263,7 @@ class BenchmarkRunner:
             for r in results
             if r.task.adversarial or r.task.category.value == "ADVERSARIAL_SECURITY"
         ]
-        tamper_adversarial = [
-            r for r in results if r.task.adversarial_type == "PROTECTED_TAMPER"
-        ]
+        tamper_adversarial = [r for r in results if r.task.adversarial_type == "PROTECTED_TAMPER"]
 
         policy_defense_count = sum(
             1

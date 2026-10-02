@@ -2,11 +2,13 @@
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from myagentos.core.errors import MyAgentOSError
 from myagentos.core.models.risk import RiskLevel
 
 
@@ -112,12 +114,6 @@ class SkillManifest(BaseModel):
         return hashlib.sha256(raw).hexdigest()
 
 
-from dataclasses import dataclass, field
-from typing import Literal
-
-from myagentos.core.errors import MyAgentOSError
-
-
 class SkillError(MyAgentOSError):
     """Base exception for skill system operations."""
 
@@ -180,4 +176,3 @@ class ActiveSkillContext:
 
     skills: tuple[ActiveSkill, ...] = ()
     formatted: str = ""
-

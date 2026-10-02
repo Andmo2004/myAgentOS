@@ -22,7 +22,7 @@ class SkillLoadError(MyAgentOSError):
 
 
 class SkillLoader:
-    """Discovers, parses, and validates skills from standard directory layouts (§20, §4, §10, §14)."""
+    """Discovers, parses, and validates skills from standard directory layouts (§20, §4, §10)."""
 
     @classmethod
     def parse_frontmatter(cls, path: Path) -> dict[str, Any]:
@@ -111,7 +111,7 @@ class SkillLoader:
 
     @classmethod
     def discover_definitions(cls, root: Path, source: SkillSource) -> list[SkillDefinition]:
-        """Discovers all skill definitions under a root directory without loading bodies (§10, §14)."""
+        """Discovers skill definitions under root directory without loading bodies (§10, §14)."""
         if not root.is_dir():
             return []
         definitions: list[SkillDefinition] = []
@@ -132,7 +132,9 @@ class SkillLoader:
                         if defn:
                             definitions.append(defn)
                             break
-            elif child.is_file() and child.name.endswith(".md") and child.name.lower() != "readme.md":
+            elif (
+                child.is_file() and child.name.endswith(".md") and child.name.lower() != "readme.md"
+            ):
                 defn = cls.load_definition(child, source=source)
                 if defn:
                     definitions.append(defn)
@@ -277,9 +279,10 @@ class SkillLoader:
 
         # 1. Try PyYAML if installed
         try:
-            import yaml  # type: ignore[import-untyped]
+            import yaml
 
             loaded = yaml.safe_load(text)
+
             if isinstance(loaded, dict):
                 return loaded
         except Exception:

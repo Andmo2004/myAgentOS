@@ -30,7 +30,11 @@ class GeminiAdapter(ProviderAdapter):
     def validate_credential(self) -> tuple[CredentialStatus, str | None, IdentityInfo | None]:
         """Validates Google Gemini credential using models.list() (§6, §26)."""
         if not self.api_key:
-            return CredentialStatus.INVALID, "GEMINI_API_KEY o GOOGLE_API_KEY no está configurada", None
+            return (
+                CredentialStatus.INVALID,
+                "GEMINI_API_KEY o GOOGLE_API_KEY no está configurada",
+                None,
+            )
         try:
             client = self._get_client()
             pager = client.models.list(config={"page_size": 1})
@@ -39,13 +43,26 @@ class GeminiAdapter(ProviderAdapter):
             return CredentialStatus.VALID, None, None
         except Exception as e:
             err_str = str(e).lower()
-            if "401" in err_str or "api_key_invalid" in err_str or "invalid" in err_str or "unauthorized" in err_str:
+            if (
+                "401" in err_str
+                or "api_key_invalid" in err_str
+                or "invalid" in err_str
+                or "unauthorized" in err_str
+            ):
                 return CredentialStatus.INVALID, "La API key no es válida o fue revocada", None
             if "403" in err_str or "permission" in err_str:
-                return CredentialStatus.INSUFFICIENT_SCOPE, "La API key no tiene permisos suficientes", None
+                return (
+                    CredentialStatus.INSUFFICIENT_SCOPE,
+                    "La API key no tiene permisos suficientes",
+                    None,
+                )
             if "429" in err_str or "quota" in err_str or "resource_exhausted" in err_str:
                 return CredentialStatus.RATE_LIMITED, "Límite de cuota o peticiones alcanzado", None
-            return CredentialStatus.PROVIDER_UNAVAILABLE, "Proveedor no disponible o sin conexión", None
+            return (
+                CredentialStatus.PROVIDER_UNAVAILABLE,
+                "Proveedor no disponible o sin conexión",
+                None,
+            )
 
     def discover_models(self) -> list[DiscoveredModel]:
         """Discovers accessible models from Google Gemini (§8)."""

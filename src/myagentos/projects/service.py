@@ -241,7 +241,7 @@ class ProjectManagerService:
             if profile:
                 stack = getattr(profile, "stack", None)
                 langs = (
-                    [str(l).lower() for l in getattr(stack, "languages", [])] if stack else []
+                    [str(lang).lower() for lang in getattr(stack, "languages", [])] if stack else []
                 )
                 tags = [
                     getattr(t, "label", str(t)).lower()
@@ -292,7 +292,8 @@ class ProjectManagerService:
                 if not readme_path.exists():
                     readme_path.write_text(
                         "# Project Skills\n\n"
-                        "Place project-specific skills here. Each skill should be in its own directory with a `SKILL.md`.\n",
+                        "Place project-specific skills here. Each skill should be in its own "
+                        "directory with a `SKILL.md`.\n",
                         encoding="utf-8",
                     )
             except OSError as exc:
@@ -585,9 +586,7 @@ class ProjectManagerService:
 
                 if filter_criteria.language and p.profile:
                     target_lang = filter_criteria.language.lower()
-                    if not any(
-                        lang.lower() == target_lang for lang in p.profile.stack.languages
-                    ):
+                    if not any(lang.lower() == target_lang for lang in p.profile.stack.languages):
                         continue
 
             results.append(p)

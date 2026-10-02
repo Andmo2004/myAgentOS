@@ -1,6 +1,5 @@
 """Healing coordinator deciding failure actions, limits, and repair strategies (§14)."""
 
-
 from myagentos.core.models.event import EventName
 from myagentos.core.models.failure import (
     FAILURE_ACTION_MAP,

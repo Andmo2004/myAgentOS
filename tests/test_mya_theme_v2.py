@@ -2,25 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any
 
 import pytest
 from textual.widgets import Input
 
 from myagentos.ui.app import MyaApp
 from myagentos.ui.theme.mya_theme import (
-    INK,
-    LINE,
-    MUTED,
-    PANEL,
-    PROVIDERS,
-    RED,
-    SAGE,
-    SAND,
-    SURFACE,
-    TEXT,
     StatusLine,
     Thinking,
     Welcome,
@@ -225,4 +213,3 @@ async def test_agent_message_renders_markdown() -> None:
         agent_msg = messages[-1]
         assert "agent" in agent_msg.classes
         assert "p-openai" in agent_msg.classes
-

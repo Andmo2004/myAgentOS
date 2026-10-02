@@ -179,8 +179,7 @@ class CuratorAgent:
             notes=[validated_note],
             success=True,
             summary=(
-                f"Synthesized note {note_id} "
-                f"(status: {validated_note.status.value}, {location})"
+                f"Synthesized note {note_id} (status: {validated_note.status.value}, {location})"
             ),
             model_used=self.model_id,
             tokens_used=tokens_used,

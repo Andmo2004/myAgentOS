@@ -160,10 +160,9 @@ def detect_repository_facts(repo_root: Path) -> DeterministicDetectionResult:
     if (repo_root / "Dockerfile").is_file():
         containers.append("Docker")
         evidence.setdefault("Docker", []).append("Dockerfile present in root")
-    has_compose = (
-        (repo_root / "docker-compose.yml").is_file()
-        or (repo_root / "docker-compose.yaml").is_file()
-    )
+    has_compose = (repo_root / "docker-compose.yml").is_file() or (
+        repo_root / "docker-compose.yaml"
+    ).is_file()
     if has_compose:
         containers.append("Docker Compose")
         evidence.setdefault("Docker", []).append("docker-compose file present")
@@ -217,14 +216,8 @@ def detect_repository_facts(repo_root: Path) -> DeterministicDetectionResult:
         if pyproject.is_file()
         else ""
     )
-    typechecking = (
-        (repo_root / "tsconfig.json").is_file()
-        or ("mypy" in pyproject_text)
-    )
-    linting = (
-        (repo_root / ".eslintrc.json").is_file()
-        or ("ruff" in pyproject_text)
-    )
+    typechecking = (repo_root / "tsconfig.json").is_file() or ("mypy" in pyproject_text)
+    linting = (repo_root / ".eslintrc.json").is_file() or ("ruff" in pyproject_text)
 
     # Compile result structures
     result.stack = StackProfile(

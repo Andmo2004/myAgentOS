@@ -140,8 +140,6 @@ def test_compile_knowledge_context(tmp_path: Path) -> None:
     assert "api.py:ping" in ctx.variable_suffix
 
 
-
-
 def test_compile_continuation_context(tmp_path: Path) -> None:
     snapshot = ProjectSnapshot(
         snapshot_id="snap-1",

@@ -30,6 +30,11 @@ class PipelineConfig(BaseModel):
     diff_approval_callback: Callable[[str, PatchSet], bool] | None = None
     skills_dir: Path | None = None
     explicit_skills: list[str] = Field(default_factory=list)
+    verification_profile: Any | None = None
+    compile_cmd: str | None = None
+    lint_cmd: str | None = None
+    test_cmd: str | None = None
+    sandbox_driver: Any | None = None
 
 
 class PipelineResult(BaseModel):

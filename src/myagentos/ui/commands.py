@@ -54,7 +54,7 @@ class SlashCommandKind(StrEnum):
     AVATAR = "avatar"
     DENSITY = "density"
     COMPACT = "density"  # compatibility alias
-    DENSE = "density"    # compatibility alias
+    DENSE = "density"  # compatibility alias
 
     # Natural language fallback
     NATURAL = "natural"

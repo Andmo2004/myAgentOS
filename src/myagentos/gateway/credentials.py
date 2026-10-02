@@ -1,6 +1,8 @@
 """Credential models, statuses, identity profiles, and fingerprinting (§4, §5, §18).
 
-Follows specifications from docs/new_features/agentic-os-feature-model-credentials-discovery.md (AO-MODEL-CREDENTIALS-01).
+Follows specifications from
+docs/new_features/agentic-os-feature-model-credentials-discovery.md
+(AO-MODEL-CREDENTIALS-01).
 """
 
 from __future__ import annotations
@@ -8,9 +10,8 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class CredentialStatus(StrEnum):
@@ -57,9 +58,7 @@ class IdentityInfo(BaseModel):
 
     def has_identity(self) -> bool:
         """Returns True if any non-empty identity attribute is present."""
-        return any(
-            v for k, v in self.__dict__.items() if k != "principal_type" and v is not None
-        )
+        return any(v for k, v in self.__dict__.items() if k != "principal_type" and v is not None)
 
     def describe(self) -> str:
         """Returns a compact readable string representing this identity."""

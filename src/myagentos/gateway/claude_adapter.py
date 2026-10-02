@@ -48,13 +48,26 @@ class ClaudeAdapter(ProviderAdapter):
             return CredentialStatus.VALID, None, None
         except Exception as e:
             err_str = str(e).lower()
-            if "401" in err_str or "invalid" in err_str or "unauthorized" in err_str or "authentication" in err_str:
+            if (
+                "401" in err_str
+                or "invalid" in err_str
+                or "unauthorized" in err_str
+                or "authentication" in err_str
+            ):
                 return CredentialStatus.INVALID, "La API key no es válida o fue revocada", None
             if "403" in err_str or "permission" in err_str or "forbidden" in err_str:
-                return CredentialStatus.INSUFFICIENT_SCOPE, "La API key no tiene permisos suficientes", None
+                return (
+                    CredentialStatus.INSUFFICIENT_SCOPE,
+                    "La API key no tiene permisos suficientes",
+                    None,
+                )
             if "429" in err_str or "rate limit" in err_str:
                 return CredentialStatus.RATE_LIMITED, "Límite de peticiones alcanzado", None
-            return CredentialStatus.PROVIDER_UNAVAILABLE, "Proveedor no disponible o sin conexión", None
+            return (
+                CredentialStatus.PROVIDER_UNAVAILABLE,
+                "Proveedor no disponible o sin conexión",
+                None,
+            )
 
     def discover_models(self) -> list[DiscoveredModel]:
         """Discovers accessible models from Anthropic (§8)."""
@@ -67,7 +80,9 @@ class ClaudeAdapter(ProviderAdapter):
             discovered: list[DiscoveredModel] = []
             for m in items:
                 raw_caps = ["code_generation", "tool_use", "structured_output"]
-                created_val = m.created_at.isoformat() if hasattr(m, "created_at") and m.created_at else None
+                created_val = (
+                    m.created_at.isoformat() if hasattr(m, "created_at") and m.created_at else None
+                )
                 discovered.append(
                     DiscoveredModel(
                         model_id=m.id,

@@ -11,27 +11,21 @@ from myagentos.categorization.selector import ScoredCandidate, select_visible_ta
 def test_select_visible_tags_max_count() -> None:
     """Verify that selected tags never exceed max_tags (5 by default)."""
     candidates = [
-        ScoredCandidate(
-            "Python", TagCategory.TECHNOLOGY, 1.0, TagSource.DETERMINISTIC, ["src"]
-        ),
+        ScoredCandidate("Python", TagCategory.TECHNOLOGY, 1.0, TagSource.DETERMINISTIC, ["src"]),
         ScoredCandidate(
             "FastAPI", TagCategory.FRAMEWORK, 1.0, TagSource.DETERMINISTIC, ["pyproject"]
         ),
         ScoredCandidate(
             "CLI", TagCategory.APPLICATION, 1.0, TagSource.DETERMINISTIC, ["entrypoint"]
         ),
-        ScoredCandidate(
-            "Developer Tools", TagCategory.DOMAIN, 0.9, TagSource.INFERRED, ["docs"]
-        ),
+        ScoredCandidate("Developer Tools", TagCategory.DOMAIN, 0.9, TagSource.INFERRED, ["docs"]),
         ScoredCandidate(
             "Docker", TagCategory.INFRASTRUCTURE, 0.9, TagSource.DETERMINISTIC, ["Dockerfile"]
         ),
         ScoredCandidate(
             "PostgreSQL", TagCategory.INFRASTRUCTURE, 0.9, TagSource.DETERMINISTIC, ["deps"]
         ),
-        ScoredCandidate(
-            "Production", TagCategory.LIFECYCLE, 0.8, TagSource.DETERMINISTIC, ["ci"]
-        ),
+        ScoredCandidate("Production", TagCategory.LIFECYCLE, 0.8, TagSource.DETERMINISTIC, ["ci"]),
     ]
 
     selected = select_visible_tags(candidates, max_tags=5)
@@ -60,18 +54,14 @@ def test_select_visible_tags_anti_redundancy() -> None:
 def test_select_visible_tags_user_overrides() -> None:
     """Verify that hidden tags are removed and pinned tags are guaranteed selected."""
     candidates = [
-        ScoredCandidate(
-            "Python", TagCategory.TECHNOLOGY, 1.0, TagSource.DETERMINISTIC, ["src"]
-        ),
+        ScoredCandidate("Python", TagCategory.TECHNOLOGY, 1.0, TagSource.DETERMINISTIC, ["src"]),
         ScoredCandidate(
             "FastAPI", TagCategory.FRAMEWORK, 1.0, TagSource.DETERMINISTIC, ["pyproject"]
         ),
         ScoredCandidate(
             "Docker", TagCategory.INFRASTRUCTURE, 0.9, TagSource.DETERMINISTIC, ["Dockerfile"]
         ),
-        ScoredCandidate(
-            "Legacy", TagCategory.LIFECYCLE, 0.5, TagSource.DETERMINISTIC, ["old"]
-        ),
+        ScoredCandidate("Legacy", TagCategory.LIFECYCLE, 0.5, TagSource.DETERMINISTIC, ["old"]),
     ]
 
     overrides = PresentationOverrides(

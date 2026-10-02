@@ -5,10 +5,8 @@ Integrates credential validation, account identity, and live model discovery (§
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import os
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -17,11 +15,9 @@ from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
 from myagentos.gateway.credentials import (
     CredentialProfile,
     CredentialStatus,
-    IdentityInfo,
     derive_fingerprint,
 )
 from myagentos.gateway.discovery import (
-    DiscoveredModel,
     DiscoveredModelSet,
     DiscoveryCache,
     EffectiveModelSet,
@@ -110,7 +106,7 @@ class ModelGateway:
             source=source,
             fingerprint=fingerprint,
             status=status,
-            last_validated_at=datetime.now(timezone.utc),
+            last_validated_at=datetime.now(UTC),
             identity=identity,
             error_message=err_msg,
         )
@@ -138,7 +134,7 @@ class ModelGateway:
                 provider=norm,
                 credential_id="none",
                 models=[],
-                discovered_at=datetime.now(timezone.utc),
+                discovered_at=datetime.now(UTC),
             )
 
         raw_key = getattr(adapter, "api_key", "")
@@ -261,7 +257,12 @@ class ModelGateway:
             )
         except Exception as exc:
             err_str = str(exc).lower()
-            if "401" in err_str or "403" in err_str or "unauthorized" in err_str or "forbidden" in err_str:
+            if (
+                "401" in err_str
+                or "403" in err_str
+                or "unauthorized" in err_str
+                or "forbidden" in err_str
+            ):
                 self.discovery_cache.invalidate(provider=resolved_provider)
                 if resolved_provider in self._credential_profiles:
                     curr = self._credential_profiles[resolved_provider]

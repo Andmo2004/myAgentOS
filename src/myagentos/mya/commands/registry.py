@@ -235,7 +235,10 @@ _BUILTIN_COMMANDS: list[CommandDefinition] = [
         name="init",
         version="1.0.0",
         category=CommandCategory.CONFIGURATION,
-        description="Inicializar o resetear estructura y memoria de Mya en el proyecto (MYA.md, skills, notas)",
+        description=(
+            "Inicializar o resetear estructura y memoria de Mya en el proyecto "
+            "(MYA.md, skills, notas)"
+        ),
         expected_cost=ExpectedCost.LOW,
         args="[reset|force]",
         supports_arguments=True,
@@ -358,7 +361,7 @@ _BUILTIN_COMMANDS: list[CommandDefinition] = [
 
 
 class CommandRegistry:
-    """Registry providing canonical lookup, versioning, and validation for Mya Commands (§18, §49)."""
+    """Registry providing lookup, versioning, and validation for Mya Commands (§18, §49)."""
 
     def __init__(self, commands: list[CommandDefinition] | None = None) -> None:
         self._commands: dict[str, CommandDefinition] = {}
@@ -379,11 +382,7 @@ class CommandRegistry:
 
     def visible_commands(self) -> list[CommandDefinition]:
         """Returns only public canonical commands (not hidden or deprecated)."""
-        return [
-            c
-            for c in self.list_all()
-            if not c.hidden and not c.deprecated
-        ]
+        return [c for c in self.list_all() if not c.hidden and not c.deprecated]
 
     def visible_names(self) -> list[str]:
         """Returns sorted canonical command names without slash."""

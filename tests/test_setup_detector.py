@@ -1,6 +1,7 @@
 """Unit tests for first run detector (§4)."""
 
 from pathlib import Path
+
 from myagentos.config.loader import save_config
 from myagentos.setup.detector import is_setup_complete, needs_first_run
 from myagentos.setup.models import (

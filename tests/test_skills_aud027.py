@@ -380,24 +380,30 @@ def test_aud027_monotonic_risk_elevation() -> None:
     skill_crit = SkillManifest(name="s-crit", min_risk_level=RiskLevel.CRITICAL)
 
     # 1. Skill increases risk from LOW to HIGH
-    assert SkillPermissionEnforcer.compute_effective_risk(
-        RiskLevel.LOW, [skill_high]
-    ) == RiskLevel.HIGH
+    assert (
+        SkillPermissionEnforcer.compute_effective_risk(RiskLevel.LOW, [skill_high])
+        == RiskLevel.HIGH
+    )
 
     # 2. Skill CANNOT reduce risk from CRITICAL to LOW or MEDIUM
-    assert SkillPermissionEnforcer.compute_effective_risk(
-        RiskLevel.CRITICAL, [skill_low, skill_med]
-    ) == RiskLevel.CRITICAL
+    assert (
+        SkillPermissionEnforcer.compute_effective_risk(RiskLevel.CRITICAL, [skill_low, skill_med])
+        == RiskLevel.CRITICAL
+    )
 
     # 3. Multiple skills: take the maximum across base and all skills
-    assert SkillPermissionEnforcer.compute_effective_risk(
-        RiskLevel.MEDIUM, [skill_low, skill_high, skill_crit]
-    ) == RiskLevel.CRITICAL
+    assert (
+        SkillPermissionEnforcer.compute_effective_risk(
+            RiskLevel.MEDIUM, [skill_low, skill_high, skill_crit]
+        )
+        == RiskLevel.CRITICAL
+    )
 
     # 4. Base HIGH with skill LOW remains HIGH
-    assert SkillPermissionEnforcer.compute_effective_risk(
-        RiskLevel.HIGH, [skill_low]
-    ) == RiskLevel.HIGH
+    assert (
+        SkillPermissionEnforcer.compute_effective_risk(RiskLevel.HIGH, [skill_low])
+        == RiskLevel.HIGH
+    )
 
 
 def test_aud027_additive_protected_paths() -> None:
@@ -568,8 +574,7 @@ verification:
     skill_events = [
         e
         for e in events
-        if e.event_name == EventName.SKILL_ACTIVATED
-        and e.actor == EventActor.SKILL_REGISTRY
+        if e.event_name == EventName.SKILL_ACTIVATED and e.actor == EventActor.SKILL_REGISTRY
     ]
     assert len(skill_events) >= 1
     skill_evt = skill_events[0]

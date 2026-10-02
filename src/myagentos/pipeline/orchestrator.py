@@ -13,10 +13,11 @@ from typing import Any
 
 from myagentos.context.closure import DependencyClosureAnalyzer
 from myagentos.context.compiler import ContextCompiler
+from myagentos.core.errors import SandboxUnavailableError
 from myagentos.core.models.event import EventActor, EventName
 from myagentos.core.models.failure import FailureCode, ObservedFailure
 from myagentos.core.models.knowledge import CuratorInput, ProjectNote
-from myagentos.core.models.patch import PatchSet
+from myagentos.core.models.patch import PatchOperation, PatchSet
 from myagentos.core.models.plan import PlanSpec
 from myagentos.core.models.review import DiffApproval, ReviewResult, ReviewSpec
 from myagentos.core.models.risk import RiskLevel
@@ -40,7 +41,7 @@ from myagentos.verification.guard import VerificationGuard, VerificationResult
 from myagentos.worker.broker import ToolBroker
 from myagentos.worker.loop import WorkerLoop
 from myagentos.worktree.manager import WorktreeManager
-from myagentos.worktree.patch_applier import apply_patch_set
+from myagentos.worktree.patch_applier import apply_patch_set, calculate_file_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,23 @@ class PipelineOrchestrator:
         self.event_store = event_store or EventStore(root_dir=events_dir)
         self.gateway = gateway or ModelGateway()
         self.policy_engine = policy_engine or PolicyEngine()
-        self.sandbox_driver = sandbox_driver or MockSandboxDriver()
+        if sandbox_driver:
+            self.sandbox_driver = sandbox_driver
+        elif self.config.sandbox_driver:
+            self.sandbox_driver = self.config.sandbox_driver
+        elif self.config.model_id == "mock":
+            self.sandbox_driver = MockSandboxDriver(use_real_subprocess=False)
+        else:
+            from myagentos.sandbox.docker import DockerSandboxDriver
+
+            if DockerSandboxDriver.is_available():
+                self.sandbox_driver = DockerSandboxDriver()
+            else:
+                raise SandboxUnavailableError(
+                    "Isolated sandbox driver (Docker) is not available or not running. "
+                    "Non-mock pipeline requires an isolated sandbox (AGF-002)."
+                )
+
         self.healing_coordinator = healing_coordinator or HealingCoordinator()
         self.independent_reviewer = independent_reviewer or IndependentReviewer(
             gateway=self.gateway
@@ -151,41 +168,7 @@ class PipelineOrchestrator:
             payload={"plan_id": plan.plan_id, "base_commit": plan.base_commit},
         )
 
-        # 5. Risk Assessment & Approval
-        assessment = self.policy_engine.assess_risk(
-            paths=list(plan.all_targeted_paths()),
-            current_risk=plan.preliminary_risk,
-        )
-        state, _ = controller.transition(
-            EventName.RISK_ASSESSED,
-            EventActor.POLICY_ENGINE,
-            payload={"level": assessment.level.value},
-        )
-
-        # Check approval if entering WAIT_PLAN_APPROVAL
-        approval = None
-        if state == JobState.WAIT_PLAN_APPROVAL:
-            approved = self._request_plan_approval(plan, assessment.level)
-            if not approved:
-                controller.transition(EventName.APPROVAL_REJECTED, EventActor.USER)
-                return self._build_result(
-                    job_id=job_id,
-                    success=False,
-                    controller=controller,
-                    intent=decision.intent.value,
-                    plan=plan,
-                    summary="Plan rejected by user or policy approval callback",
-                    duration_seconds=time.monotonic() - t0,
-                )
-            approval = self.planner.create_approval(plan, risk_level=assessment.level)
-            state, _ = controller.transition(EventName.APPROVAL_GRANTED, EventActor.USER)
-        else:
-            approval = self.planner.create_approval(
-                plan, risk_level=RiskLevel.LOW, approved_by="policy"
-            )
-
-        # 6. Worker Context & Worktree
-        # Discover and match skills Just-in-Time (§20, AUD-027)
+        # 5. Worker Context & Skills Discovery (§20, AUD-027, AGF-005)
         active_skills = self.skill_registry.match_skills(
             task_prompt=task_prompt,
             target_paths=list(plan.all_targeted_paths()),
@@ -205,12 +188,47 @@ class PipelineOrchestrator:
                 },
             )
 
-        # Monotonically elevate risk if skills require higher minimum risk (§20, AUD-027)
+        # Monotonically elevate risk if skills require higher minimum risk (§20, AUD-027, AGF-005)
         effective_risk = SkillPermissionEnforcer.compute_effective_risk(
-            assessment.level, active_skills
+            plan.preliminary_risk, active_skills
         )
-        if effective_risk > assessment.level:
-            assessment = assessment.model_copy(update={"level": effective_risk})
+        assessment = self.policy_engine.assess_risk(
+            paths=list(plan.all_targeted_paths()),
+            current_risk=effective_risk,
+        )
+        state, _ = controller.transition(
+            EventName.RISK_ASSESSED,
+            EventActor.POLICY_ENGINE,
+            payload={"level": assessment.level.value},
+        )
+
+        # 6. Risk Assessment & Approval Check (AGF-005)
+        approval = None
+        if state == JobState.WAIT_PLAN_APPROVAL:
+            approved = self._request_plan_approval(plan, assessment.level)
+            if not approved:
+                controller.transition(EventName.APPROVAL_REJECTED, EventActor.USER)
+                return self._build_result(
+                    job_id=job_id,
+                    success=False,
+                    controller=controller,
+                    intent=decision.intent.value,
+                    plan=plan,
+                    summary=(
+                        "Plan approval was rejected, failed, or missing callback (AGF-005)"
+                    ),
+                    duration_seconds=time.monotonic() - t0,
+                )
+            actor = EventActor.POLICY_ENGINE if self.config.auto_approve else EventActor.USER
+            approved_by = "policy" if self.config.auto_approve else "user"
+            approval = self.planner.create_approval(
+                plan, risk_level=assessment.level, approved_by=approved_by
+            )
+            state, _ = controller.transition(EventName.APPROVAL_GRANTED, actor)
+        else:
+            approval = self.planner.create_approval(
+                plan, risk_level=assessment.level, approved_by="policy"
+            )
 
         token = self.policy_engine.issue_capability_token(
             job_id=job_id,
@@ -246,6 +264,7 @@ class PipelineOrchestrator:
                 worktree_path=worktree_path,
                 token=token,
                 sandbox=self.sandbox_driver,
+                base_path=self.repo_root,
             )
             loop = WorkerLoop(
                 gateway=self.gateway,
@@ -306,7 +325,12 @@ class PipelineOrchestrator:
                 verification_res = self.verification_guard.verify(
                     worktree_path=worktree_path,
                     base_commit=base_commit,
+                    compile_cmd=self.config.compile_cmd,
+                    lint_cmd=self.config.lint_cmd,
+                    project_test_cmd=self.config.test_cmd,
+                    profile=self.config.verification_profile,
                 )
+
                 if verification_res.passed:
                     controller.transition(
                         EventName.VERIFICATION_COMPLETED,
@@ -580,11 +604,16 @@ class PipelineOrchestrator:
                     payload={"old_base": plan.base_commit, "new_base": current_head},
                 )
 
-                # Re-run complete verification on rebased code (§8.4)
+                # Re-run complete verification on rebased code (§8.4, AGF-004)
                 verification_res = self.verification_guard.verify(
                     worktree_path=worktree_path,
                     base_commit=current_head,
+                    compile_cmd=self.config.compile_cmd,
+                    lint_cmd=self.config.lint_cmd,
+                    project_test_cmd=self.config.test_cmd,
+                    profile=self.config.verification_profile,
                 )
+
                 if not verification_res.passed:
                     controller.transition(
                         EventName.TEST_FAILED,
@@ -620,10 +649,83 @@ class PipelineOrchestrator:
                         payload={"reason": "approval remains valid after safe rebase (§8.4)"},
                     )
 
-            # Apply sealed patch set to repository root
-            apply_patch_set(self.repo_root, patch_set, verify_before_hash=False)
+            # Re-validate diff approval prior to application (AGF-007)
+            if diff_approval is not None:
+                val_ok, val_err = self.diff_approval_manager.validate_approval(
+                    diff_approval, patch_set
+                )
+                if not val_ok:
+                    return self._build_result(
+                        job_id=job_id,
+                        success=False,
+                        controller=controller,
+                        intent=decision.intent.value,
+                        plan=plan,
+                        patch_set=patch_set,
+                        verification=verification_res,
+                        review=review_res,
+                        diff_approval=diff_approval,
+                        summary=f"Diff approval validation failed before merge: {val_err}",
+                        duration_seconds=time.monotonic() - t0,
+                    )
 
+            # Preconditions check on target repo_root: detect local uncommitted conflicts (AGF-006)
+            for f in patch_set.files:
+                if f.operation in (PatchOperation.MODIFY, PatchOperation.DELETE):
+                    disk_target = self.repo_root / f.path
+                    if disk_target.exists() and f.sha256_before:
+                        actual_disk_hash = calculate_file_sha256(disk_target)
+                        if actual_disk_hash != f.sha256_before:
+                            controller.transition(
+                                EventName.MERGE_CONFLICT,
+                                EventActor.MERGE_CONTROLLER,
+                                payload={"conflicted_path": f.path},
+                            )
+                            return self._build_result(
+                                job_id=job_id,
+                                success=False,
+                                controller=controller,
+                                intent=decision.intent.value,
+                                plan=plan,
+                                patch_set=patch_set,
+                                verification=verification_res,
+                                review=review_res,
+                                diff_approval=diff_approval,
+                                summary=(
+                                    f"Merge conflict: local uncommitted changes in '{f.path}' "
+                                    f"conflict with approved patch base hash (AGF-006)"
+                                ),
+                                duration_seconds=time.monotonic() - t0,
+                            )
+
+            # Transition from MERGE_CHECK to MERGE
             controller.transition(EventName.MERGE_COMPLETED, EventActor.MERGE_CONTROLLER)
+
+            # Apply sealed patch set to repository root and verify result (AGF-006)
+            applied_ok, apply_err = apply_patch_set(
+                self.repo_root, patch_set, verify_before_hash=True
+            )
+            if not applied_ok:
+                controller.transition(
+                    EventName.MERGE_CONFLICT,
+                    EventActor.MERGE_CONTROLLER,
+                    payload={"error": apply_err},
+                )
+                return self._build_result(
+                    job_id=job_id,
+                    success=False,
+                    controller=controller,
+                    intent=decision.intent.value,
+                    plan=plan,
+                    patch_set=patch_set,
+                    verification=verification_res,
+                    review=review_res,
+                    diff_approval=diff_approval,
+                    summary=f"Final patch application failed on destination repo: {apply_err}",
+                    duration_seconds=time.monotonic() - t0,
+                )
+
+            # Transition from MERGE to KNOWLEDGE_UPDATE upon confirmed merge
             controller.transition(EventName.MERGE_COMPLETED, EventActor.MERGE_CONTROLLER)
 
             # 12. Knowledge Update & Complete (§22)
@@ -725,15 +827,23 @@ class PipelineOrchestrator:
         if self.config.auto_approve:
             return True
         if self.config.approval_callback:
-            return self.config.approval_callback(plan.plan_id, plan)
-        return True
+            try:
+                return bool(self.config.approval_callback(plan.plan_id, plan))
+            except Exception:
+                return False
+        # AGF-005: Never grant implicit user approval without callback
+        return False
 
     def _request_diff_approval(self, patch_set: PatchSet) -> bool:
         if self.config.auto_approve:
             return True
         if self.config.diff_approval_callback:
-            return self.config.diff_approval_callback(patch_set.job_id, patch_set)
-        return True
+            try:
+                return bool(self.config.diff_approval_callback(patch_set.job_id, patch_set))
+            except Exception:
+                return False
+        # AGF-005: Never grant implicit user diff approval without callback
+        return False
 
     def _prepare_worktree(self, job_id: str, base_commit: str) -> tuple[Path, bool]:
         """Creates ephemeral worktree if git available, else isolated temp directory."""

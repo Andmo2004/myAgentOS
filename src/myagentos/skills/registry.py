@@ -10,12 +10,11 @@ from myagentos.skills.models import (
     ActiveSkill,
     SkillDefinition,
     SkillManifest,
-    SkillSource,
 )
 
 
 class SkillRegistry:
-    """Registry maintaining active skills, definitions, and matching triggers Just-in-Time (§20, §13)."""
+    """Registry maintaining active skills, definitions, and matching triggers JIT (§20, §13)."""
 
     def __init__(self) -> None:
         # Legacy SkillManifest mapping

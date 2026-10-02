@@ -41,3 +41,23 @@ class StateTransitionError(MyAgentOSError):
 
 class SandboxExecutionError(MyAgentOSError):
     """Raised when sandbox execution fails due to environment or resource limits."""
+
+
+class SandboxUnavailableError(SandboxExecutionError):
+    """Raised when an isolated sandbox driver is required but unavailable (§11)."""
+
+
+class PathEscapeError(PolicyViolationError):
+    """Raised when a path attempts directory traversal or escapes authorized boundary (§10)."""
+
+
+class SymlinkDisallowedError(PolicyViolationError):
+    """Raised when an operation encounters an untrusted symlink (§10.3, AGF-003)."""
+
+
+class ApprovalRequiredError(PolicyViolationError):
+    """Raised when an operation requires approval that has not been granted (§8, AGF-005)."""
+
+
+class PatchApplicationError(MyAgentOSError):
+    """Raised when applying a patch set fails or cannot maintain integrity (AGF-006)."""

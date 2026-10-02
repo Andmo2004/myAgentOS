@@ -1,22 +1,15 @@
-"""Tests for MYA.md instructions, JIT SkillRetriever integration, and cross-model consistency (§19-§25)."""
+"""Tests for MYA.md instructions, JIT SkillRetriever, and consistency (§19-§25)."""
 
-import json
 from pathlib import Path
-import re
-import pytest
 
 from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
 from myagentos.gateway.client import ModelGateway
 from myagentos.memory.manager import SharedMemoryManager
-from myagentos.memory.models import MemoryRecord
 from myagentos.mya.agent import MyaAgent
-from myagentos.mya.instructions import MyaInstructionLoader, MyaInstructions
+from myagentos.mya.instructions import MyaInstructionLoader
 from myagentos.projects.models import Project, ProjectState
 from myagentos.projects.registry import ProjectRegistry
 from myagentos.projects.service import ProjectManagerService
-from myagentos.skills.models import SkillDefinition
-from myagentos.skills.registry import SkillRegistry
-from myagentos.skills.retriever import SkillRetriever
 from myagentos.ui.session import Session
 
 
@@ -102,7 +95,8 @@ def test_mya_md_and_memory_and_skills_separation_in_converse(tmp_path: Path):
 
     # 1. Project instructions (MYA.md)
     (project_root / "MYA.md").write_text(
-        "# MYA.md\n## Rules\nAlways verify SQL query execution plans.\n## Preferred Skills\n- #database\n",
+        "# MYA.md\n## Rules\nAlways verify SQL query execution plans.\n"
+        "## Preferred Skills\n- #database\n",
         encoding="utf-8",
     )
 
@@ -172,7 +166,7 @@ def test_mya_md_and_memory_and_skills_separation_in_converse(tmp_path: Path):
 
 
 def test_model_independence_exact_same_context_package(tmp_path: Path):
-    """Verify OpenAI, Anthropic, Gemini, and Mock receive identical SkillContext and MemoryContext (§24, §25)."""
+    """Verify all models receive identical SkillContext and MemoryContext (§24, §25)."""
     project_root = tmp_path / "project_multi"
     project_root.mkdir()
 

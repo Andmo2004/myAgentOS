@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from myagentos.skills.loader import SkillLoader
 from myagentos.skills.models import (
     ActiveSkill,
     CircularDependencyError,
@@ -20,7 +19,15 @@ def test_builtin_skills_discovered():
     registry = SkillRegistry()
     discovered = registry.discover()
     names = {s.name for s in discovered}
-    assert {"cybersecurity", "python", "testing", "debugging", "database", "git", "research"}.issubset(names)
+    assert {
+        "cybersecurity",
+        "python",
+        "testing",
+        "debugging",
+        "database",
+        "git",
+        "research",
+    }.issubset(names)
 
     sec = registry.get_definition("cybersecurity")
     assert sec is not None
@@ -31,12 +38,18 @@ def test_builtin_skills_discovered():
 
 
 def test_jit_loading_only_on_demand(tmp_path: Path):
-    """Verify discovery parses only frontmatter and does not load full body until load() (§8, §14, §16)."""
+    """Verify discovery parses frontmatter and does not load full body until load() (§8)."""
     skill_dir = tmp_path / "skills" / "custom"
     skill_dir.mkdir(parents=True)
-    body_text = "# Custom Skill Instructions\n\nDeep procedural content that should not load in discovery."
+    body_text = (
+        "# Custom Skill Instructions\n\nDeep procedural content that should not load in discovery."
+    )
+    frontmatter = (
+        "---\nname: custom\ndescription: Custom skill\nversion: 1.0.0\n"
+        "tags:\n  - custom\nsource: project\n---\n\n"
+    )
     (skill_dir / "SKILL.md").write_text(
-        f"---\nname: custom\ndescription: Custom skill\nversion: 1.0.0\ntags:\n  - custom\nsource: project\n---\n\n{body_text}",
+        f"{frontmatter}{body_text}",
         encoding="utf-8",
     )
 
@@ -59,10 +72,12 @@ def test_hierarchical_discovery_and_project_precedence(tmp_path: Path):
     project_root = tmp_path / "project"
     project_skills = project_root / "skills" / "python"
     project_skills.mkdir(parents=True)
-    (project_skills / "SKILL.md").write_text(
-        "---\nname: python\ndescription: Project specialized python conventions\nversion: 2.0.0\ntags:\n  - python\n  - custom-api\nsource: project\n---\n\nProject python rules.",
-        encoding="utf-8",
+    content_python = (
+        "---\nname: python\ndescription: Project specialized python conventions\n"
+        "version: 2.0.0\ntags:\n  - python\n  - custom-api\nsource: project\n---\n\n"
+        "Project python rules."
     )
+    (project_skills / "SKILL.md").write_text(content_python, encoding="utf-8")
 
     registry = SkillRegistry()
     registry.discover(project_root=project_root)
@@ -85,17 +100,21 @@ def test_skill_retriever_scoring_and_selection(tmp_path: Path):
     # Create project skill #api
     api_dir = skills_dir / "api"
     api_dir.mkdir(parents=True)
-    (api_dir / "SKILL.md").write_text(
-        "---\nname: api\ndescription: FastAPI REST endpoint engineering\nversion: 1.0.0\ntags:\n  - api\n  - rest\ntriggers:\n  - fastapi\n  - endpoints\nsource: project\n---\n\nAPI instructions.",
-        encoding="utf-8",
+    content_api = (
+        "---\nname: api\ndescription: FastAPI REST endpoint engineering\n"
+        "version: 1.0.0\ntags:\n  - api\n  - rest\ntriggers:\n  - fastapi\n  - endpoints\n"
+        "source: project\n---\n\nAPI instructions."
     )
+    (api_dir / "SKILL.md").write_text(content_api, encoding="utf-8")
     # Create user skill #latex in a separate directory
     user_dir = tmp_path / "user_skills" / "latex"
     user_dir.mkdir(parents=True)
-    (user_dir / "SKILL.md").write_text(
-        "---\nname: latex\ndescription: LaTeX document compilation\nversion: 1.0.0\ntags:\n  - latex\n  - tex\ntriggers:\n  - pdflatex\nsource: user\n---\n\nLaTeX instructions.",
-        encoding="utf-8",
+    content_latex = (
+        "---\nname: latex\ndescription: LaTeX document compilation\n"
+        "version: 1.0.0\ntags:\n  - latex\n  - tex\ntriggers:\n  - pdflatex\n"
+        "source: user\n---\n\nLaTeX instructions."
     )
+    (user_dir / "SKILL.md").write_text(content_latex, encoding="utf-8")
 
     registry = SkillRegistry()
     registry.discover(project_root=project_root, user_skills_dir=tmp_path / "user_skills")
@@ -120,18 +139,20 @@ def test_project_isolation(tmp_path: Path):
     proj_a = tmp_path / "proj_a"
     skill_a = proj_a / "skills" / "internal-platform"
     skill_a.mkdir(parents=True)
-    (skill_a / "SKILL.md").write_text(
-        "---\nname: internal-platform\ndescription: Platform A\nversion: 1.0.0\ntags: [platform]\nsource: project\n---\n\nPlatform.",
-        encoding="utf-8",
+    content_a = (
+        "---\nname: internal-platform\ndescription: Platform A\n"
+        "version: 1.0.0\ntags: [platform]\nsource: project\n---\n\nPlatform."
     )
+    (skill_a / "SKILL.md").write_text(content_a, encoding="utf-8")
 
     proj_b = tmp_path / "proj_b"
     skill_b = proj_b / "skills" / "game-engine"
     skill_b.mkdir(parents=True)
-    (skill_b / "SKILL.md").write_text(
-        "---\nname: game-engine\ndescription: Game B\nversion: 1.0.0\ntags: [game]\nsource: project\n---\n\nGame.",
-        encoding="utf-8",
+    content_b = (
+        "---\nname: game-engine\ndescription: Game B\n"
+        "version: 1.0.0\ntags: [game]\nsource: project\n---\n\nGame."
     )
+    (skill_b / "SKILL.md").write_text(content_b, encoding="utf-8")
 
     registry_a = SkillRegistry()
     registry_a.discover(project_root=proj_a)
@@ -200,7 +221,7 @@ def test_dependency_resolution_and_topological_order():
 
 
 def test_circular_dependency_detection():
-    """Verify circular dependencies A -> B -> A are detected and raise CircularDependencyError (§17)."""
+    """Verify circular dependencies A -> B -> A raise CircularDependencyError (§17)."""
     registry = SkillRegistry()
     registry.register_definition(
         SkillDefinition(
@@ -241,7 +262,7 @@ def test_dependency_depth_limit():
     """Verify chains deeper than max depth raise SkillDependencyDepthError (§18)."""
     registry = SkillRegistry()
     for i in range(5):
-        next_req = (f"chain-{i+1}",) if i < 4 else ()
+        next_req = (f"chain-{i + 1}",) if i < 4 else ()
         registry.register_definition(
             SkillDefinition(
                 id=f"builtin:chain-{i}",

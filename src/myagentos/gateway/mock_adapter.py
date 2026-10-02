@@ -139,14 +139,14 @@ class MockProviderAdapter(ProviderAdapter):
         trash_available = "## Trashed projects (" in context
         trash_empty = "Trash is empty" in context
         if active_block:
-            active_name = re.search(r"(?m)^name: (.+)$", active_block.group(1))
-            active_state = re.search(r"(?m)^project_state: (.+)$", active_block.group(1))
-            active_tags = re.search(r"(?m)^tags: (.+)$", active_block.group(1))
-            active_languages = re.search(r"(?m)^languages: (.+)$", active_block.group(1))
-            active_name = active_name.group(1) if active_name else "unavailable"
-            active_state = active_state.group(1) if active_state else ""
-            active_tags = active_tags.group(1) if active_tags else ""
-            active_languages = active_languages.group(1) if active_languages else ""
+            m_name = re.search(r"(?m)^name: (.+)$", active_block.group(1))
+            m_state = re.search(r"(?m)^project_state: (.+)$", active_block.group(1))
+            m_tags = re.search(r"(?m)^tags: (.+)$", active_block.group(1))
+            m_langs = re.search(r"(?m)^languages: (.+)$", active_block.group(1))
+            active_name = m_name.group(1) if m_name else "unavailable"
+            active_state = m_state.group(1) if m_state else ""
+            active_tags = m_tags.group(1) if m_tags else ""
+            active_languages = m_langs.group(1) if m_langs else ""
 
         memory_records = re.findall(
             r'<memory scope="(user|project|session)"[^>]*>(.*?)</memory>',

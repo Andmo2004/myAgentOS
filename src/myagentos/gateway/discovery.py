@@ -1,12 +1,13 @@
 """Live model discovery, cache, and effective model set calculation (§8, §9, §14, §15).
 
-Follows specifications from docs/new_features/agentic-os-feature-model-credentials-discovery.md (AO-MODEL-CREDENTIALS-01).
+Follows specifications from
+docs/new_features/agentic-os-feature-model-credentials-discovery.md
+(AO-MODEL-CREDENTIALS-01).
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,11 +41,11 @@ class DiscoveredModelSet(BaseModel):
     @property
     def is_expired(self) -> bool:
         """Checks if the cached discovery result has exceeded its TTL (§14)."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         discovered = (
             self.discovered_at
             if self.discovered_at.tzinfo
-            else self.discovered_at.replace(tzinfo=timezone.utc)
+            else self.discovered_at.replace(tzinfo=UTC)
         )
         age = (now - discovered).total_seconds()
         return age >= self.ttl_seconds
@@ -104,7 +105,7 @@ class DiscoveryCache:
     ) -> DiscoveredModelSet:
         """Caches discovered models for a given provider and credential."""
         key = (provider.lower().strip(), credential_id.strip())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ttl = ttl_seconds if ttl_seconds is not None else self.default_ttl_seconds
         entry = DiscoveredModelSet(
             provider=provider.lower().strip(),
@@ -116,9 +117,7 @@ class DiscoveryCache:
         self._cache[key] = entry
         return entry
 
-    def invalidate(
-        self, provider: str | None = None, credential_id: str | None = None
-    ) -> None:
+    def invalidate(self, provider: str | None = None, credential_id: str | None = None) -> None:
         """Invalidates discovery entries for a provider, credential, or both (§15)."""
         if provider is None and credential_id is None:
             self.clear()
@@ -128,8 +127,7 @@ class DiscoveryCache:
         c = credential_id.strip() if credential_id else None
 
         keys_to_delete = [
-            k for k in self._cache.keys()
-            if (p is None or k[0] == p) and (c is None or k[1] == c)
+            k for k in self._cache.keys() if (p is None or k[0] == p) and (c is None or k[1] == c)
         ]
         for k in keys_to_delete:
             self._cache.pop(k, None)

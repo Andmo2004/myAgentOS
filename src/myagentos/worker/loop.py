@@ -14,6 +14,8 @@ from myagentos.worker.models import (
     FileEditProposal,
     PatchProposal,
     ToolCall,
+    ToolResult,
+    ToolStatus,
     WorkerMode,
     WorkerResult,
     WorkerStep,
@@ -197,9 +199,43 @@ class WorkerLoop:
 
             # 1. Propose Patch (Success termination condition)
             if proposal is not None:
+                is_valid, validation_err = self.broker.validate_proposal(proposal)
+                if not is_valid:
+                    if self.event_store:
+                        self.event_store.append(
+                            job_id=self.job_id,
+                            actor=EventActor.POLICY_ENGINE,
+                            state="EXECUTE",
+                            event_name=EventName.POLICY_VIOLATION,
+                            payload={"error": validation_err},
+                        )
+                    steps.append(
+                        WorkerStep(
+                            step_index=step_idx,
+                            thought=thought,
+                            duration_ms=step_duration,
+                            tool_result=ToolResult(
+                                call_id=f"proposal-{step_idx}",
+                                status=ToolStatus.PERMISSION_DENIED,
+                                output="",
+                                error=validation_err,
+                            ),
+                        )
+                    )
+                    return WorkerResult(
+                        job_id=self.job_id,
+                        success=False,
+                        patch_set=None,
+                        steps=steps,
+                        total_steps=len(steps),
+                        stop_reason="POLICY_VIOLATION",
+                    )
+
                 patch_set = self.broker.build_patch_set_from_proposal(self.job_id, proposal)
 
-                applied_ok, err = apply_patch_set(self.broker.worktree_path, patch_set)
+                applied_ok, err = apply_patch_set(
+                    self.broker.worktree_path, patch_set, verify_before_hash=False
+                )
 
                 steps.append(
                     WorkerStep(

@@ -1,7 +1,7 @@
 """Unit tests for config loader and saver (§15)."""
 
 from pathlib import Path
-import pytest
+
 from myagentos.config.loader import load_config, save_config
 from myagentos.setup.models import (
     MyaHomeConfig,

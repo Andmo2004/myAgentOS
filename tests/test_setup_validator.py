@@ -1,6 +1,7 @@
 """Unit tests for Mya Home path validator (§16)."""
 
 from pathlib import Path
+
 from myagentos.setup.validator import is_protected_path, validate_mya_home
 
 

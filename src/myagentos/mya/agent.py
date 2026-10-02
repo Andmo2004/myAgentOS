@@ -42,7 +42,7 @@ from myagentos.mya.prompts import (
     MYA_CONVERSE_PROMPT,
     MYA_INTERPRET_PROMPT,
 )
-from myagentos.skills.models import ActiveSkill, ActiveSkillContext
+from myagentos.skills.models import ActiveSkill
 from myagentos.skills.registry import SkillRegistry
 from myagentos.skills.retriever import SkillRetriever
 from myagentos.ui.session import Session
@@ -519,7 +519,10 @@ class MyaAgent:
                 return f"Skills activadas para esta consulta: {skills_str}."
             return "No hay skills especializadas activas para esta consulta."
 
-        if any(term in lower for term in ("mya.md", "reglas del proyecto", "instrucciones del proyecto")):
+        if any(
+            term in lower
+            for term in ("mya.md", "reglas del proyecto", "instrucciones del proyecto")
+        ):
             if self.last_instructions and self.last_instructions.has_content:
                 return f"Instrucciones de MYA.md:\n{self.last_instructions.content}"
             return "No hay archivo MYA.md con instrucciones registrado en el proyecto."
@@ -576,23 +579,23 @@ class MyaAgent:
                 )
             )
             if active_project_question:
-                project = context.active_project
-                if project:
-                    details = [project.state]
-                    if project.tags:
-                        details.append(f"etiquetas: {', '.join(project.tags)}")
-                    if project.languages:
-                        details.append(f"lenguajes: {', '.join(project.languages)}")
-                    if project.application_types:
-                        details.append(f"tipo: {', '.join(project.application_types)}")
+                active_proj = context.active_project
+                if active_proj:
+                    details = [active_proj.state]
+                    if active_proj.tags:
+                        details.append(f"etiquetas: {', '.join(active_proj.tags)}")
+                    if active_proj.languages:
+                        details.append(f"lenguajes: {', '.join(active_proj.languages)}")
+                    if active_proj.application_types:
+                        details.append(f"tipo: {', '.join(active_proj.application_types)}")
                     if context.branch:
                         details.append(f"rama: {context.branch}")
                     if profile_question:
                         return (
-                            f"El proyecto activo {project.name} tiene este perfil: "
+                            f"El proyecto activo {active_proj.name} tiene este perfil: "
                             f"{'; '.join(details)}."
                         )
-                    return f"El proyecto activo es {project.name} ({'; '.join(details)})."
+                    return f"El proyecto activo es {active_proj.name} ({'; '.join(details)})."
                 return "No tengo identificado un proyecto activo en la sesión actual."
             if not context.projects_available:
                 return "No puedo consultar el registro de proyectos en este momento."
@@ -609,8 +612,8 @@ class MyaAgent:
 
         if any(term in lower for term in ("contexto", "sabes del", "sabes sobre", "qué sabes")):
             if context.active_project:
-                details = ", ".join(context.active_project.tags)
-                suffix = f"; etiquetas: {details}" if details else ""
+                tag_details = ", ".join(context.active_project.tags)
+                suffix = f"; etiquetas: {tag_details}" if tag_details else ""
                 return f"Tengo contexto del proyecto activo {context.active_project.name}{suffix}."
             return "No tengo un proyecto activo identificado en el contexto actual."
 

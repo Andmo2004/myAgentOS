@@ -69,9 +69,7 @@ class DeterministicNoteValidator:
                 summary = StructuralExtractor.extract_file(target_path, rel_path)
                 symbol_names = {s.name for s in summary.symbols}
                 if target not in symbol_names and target not in content:
-                    findings.append(
-                        f"Anchor symbol '{target}' not found in '{rel_path}'"
-                    )
+                    findings.append(f"Anchor symbol '{target}' not found in '{rel_path}'")
 
         return findings
 
@@ -113,9 +111,7 @@ class DeterministicNoteValidator:
         all_errors = anchor_errors + secret_errors
 
         if not all_errors:
-            return note.model_copy(
-                update={"status": NoteStatus.VERIFIED, "rejection_reasons": []}
-            )
+            return note.model_copy(update={"status": NoteStatus.VERIFIED, "rejection_reasons": []})
 
         return note.model_copy(
             update={"status": NoteStatus.REJECTED, "rejection_reasons": all_errors}

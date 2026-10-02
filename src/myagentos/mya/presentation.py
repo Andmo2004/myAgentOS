@@ -148,11 +148,15 @@ class GlyphMyaRenderer:
         state: MyaRenderState,
         ascii_only: bool = False,
     ) -> str:
-        top = "+- Mya ---------------------------------------------+" if ascii_only else (
-            "╭─ Mya ─────────────────────────────────────────────╮"
+        top = (
+            "+- Mya ---------------------------------------------+"
+            if ascii_only
+            else ("╭─ Mya ─────────────────────────────────────────────╮")
         )
-        bot = "+---------------------------------------------------+" if ascii_only else (
-            "╰───────────────────────────────────────────────────╯"
+        bot = (
+            "+---------------------------------------------------+"
+            if ascii_only
+            else ("╰───────────────────────────────────────────────────╯")
         )
         return f"[cyan]{top}[/cyan]\n{message}\n[cyan]{bot}[/cyan]"
 
@@ -189,21 +193,9 @@ class AsciiMyaRenderer:
         eyes, mouth = table.get(expr, table["calm"])
 
         if ascii_only:
-            return (
-                "  +-----+\n"
-                f"  | {eyes} |\n"
-                f"  |  {mouth}  |\n"
-                "  +-----+\n"
-                "   Mya"
-            )
+            return f"  +-----+\n  | {eyes} |\n  |  {mouth}  |\n  +-----+\n   Mya"
 
-        return (
-            "  ╭─────╮\n"
-            f"  │ {eyes} │\n"
-            f"  │  {mouth}  │\n"
-            "  ╰─────╯\n"
-            "   Mya"
-        )
+        return f"  ╭─────╮\n  │ {eyes} │\n  │  {mouth}  │\n  ╰─────╯\n   Mya"
 
     def render_speech_bubble(
         self,

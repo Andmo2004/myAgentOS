@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from myagentos.memory.models import MemoryRecord
 
@@ -40,12 +40,18 @@ def _record_from_json(raw: dict[str, object]) -> MemoryRecord:
     scope = raw.get("scope")
     if scope not in {"user", "project", "session"}:
         raise ValueError("Unknown memory scope")
+    user_id_raw = raw.get("user_id")
+    project_id_raw = raw.get("project_id")
+    session_id_raw = raw.get("session_id")
+    prov_raw = raw.get("provenance")
+    prov_dict = prov_raw if isinstance(prov_raw, dict) else {}
+
     return MemoryRecord(
         memory_id=str(raw["memory_id"]),
-        scope=scope,  # type: ignore[arg-type]
-        user_id=raw.get("user_id") if isinstance(raw.get("user_id"), str) else None,
-        project_id=raw.get("project_id") if isinstance(raw.get("project_id"), str) else None,
-        session_id=raw.get("session_id") if isinstance(raw.get("session_id"), str) else None,
+        scope=scope,
+        user_id=str(user_id_raw) if isinstance(user_id_raw, str) else None,
+        project_id=str(project_id_raw) if isinstance(project_id_raw, str) else None,
+        session_id=str(session_id_raw) if isinstance(session_id_raw, str) else None,
         namespace_id=str(raw["namespace_id"]),
         content=str(raw["content"]),
         status=str(raw["status"]),
@@ -55,10 +61,7 @@ def _record_from_json(raw: dict[str, object]) -> MemoryRecord:
         updated_at=datetime.fromisoformat(str(raw["updated_at"])),
         source=str(raw["source"]),
         content_hash=str(raw["content_hash"]),
-        provenance={
-            str(key): str(value)
-            for key, value in (raw.get("provenance") or {}).items()  # type: ignore[union-attr]
-        },
+        provenance={str(k): str(v) for k, v in prov_dict.items()},
     )
 
 

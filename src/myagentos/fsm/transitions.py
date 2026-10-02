@@ -115,6 +115,8 @@ class TransitionTable:
                 return JobState.RISK_FINAL
 
         elif current_state == JobState.RISK_FINAL:
+            if event_name == EventName.SKILL_ACTIVATED:
+                return JobState.RISK_FINAL
             if event_name == EventName.RISK_ASSESSED:
                 level_str = payload.get("level", "LOW")
                 level = (
@@ -223,6 +225,8 @@ class TransitionTable:
         elif current_state == JobState.MERGE:
             if event_name == EventName.MERGE_COMPLETED:
                 return JobState.KNOWLEDGE_UPDATE
+            if event_name in (EventName.MERGE_CONFLICT, EventName.JOB_FAILED):
+                return JobState.MERGE_CONFLICT
 
         elif current_state == JobState.KNOWLEDGE_UPDATE:
             # Post-merge is strictly non-blocking (§8 & §22.2)

@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from textual.widgets import Input
 
 from myagentos.memory.manager import SharedMemoryManager
 from myagentos.ui.app import MyaApp
@@ -15,8 +14,6 @@ async def test_density_command_switches_classes():
     temp_dir = Path(tempfile.mkdtemp())
     app = MyaApp(repo_path=temp_dir)
     async with app.run_test(size=(80, 24)) as pilot:
-        inp = pilot.app.query_one("#prompt-input", Input)
-
         # 1. Switch to compact
         app._fill_prompt("/density compact")
         await pilot.press("enter")
@@ -51,8 +48,6 @@ async def test_memory_command_renders_status_and_search():
     app = MyaApp(repo_path=temp_dir)
     app.mya_agent.memory_manager = memory
     async with app.run_test(size=(80, 24)) as pilot:
-        inp = pilot.app.query_one("#prompt-input", Input)
-
         # 1. Status overview
         app._fill_prompt("/memory")
         await pilot.press("enter")
@@ -69,8 +64,6 @@ async def test_skills_command_renders_catalog_and_search():
     temp_dir = Path(tempfile.mkdtemp())
     app = MyaApp(repo_path=temp_dir)
     async with app.run_test(size=(80, 24)) as pilot:
-        inp = pilot.app.query_one("#prompt-input", Input)
-
         # 1. Skills catalog
         app._fill_prompt("/skills")
         await pilot.press("enter")
@@ -92,8 +85,6 @@ async def test_init_command_creates_and_resets_environment():
     temp_dir = Path(tempfile.mkdtemp())
     app = MyaApp(repo_path=temp_dir)
     async with app.run_test(size=(80, 24)) as pilot:
-        inp = pilot.app.query_one("#prompt-input", Input)
-
         # 1. Run /init to create project Mya environment
         app._fill_prompt("/init")
         await pilot.press("enter")
@@ -116,4 +107,3 @@ async def test_init_command_creates_and_resets_environment():
         assert (temp_dir / "MYA.md.bak").is_file()
         assert "Rule 42" in (temp_dir / "MYA.md.bak").read_text(encoding="utf-8")
         assert "## Rules" in (temp_dir / "MYA.md").read_text(encoding="utf-8")
-

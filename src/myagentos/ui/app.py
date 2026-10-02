@@ -24,7 +24,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import Footer, Input, OptionList, Static
+from textual.widgets import Input, OptionList, Static
 from textual.worker import Worker
 
 from myagentos.gateway.client import ModelGateway
@@ -48,8 +48,6 @@ from myagentos.ui.theme.mya_theme import (
     MUTED,
     MYA_RICH_THEME,
     PROVIDERS,
-    SAGE,
-    SAND,
     StatusLine,
     Thinking,
     Welcome,
@@ -65,7 +63,6 @@ from myagentos.ui.widgets.chat import (
     CommandSuggestions,
     MessageRole,
     PromptInput,
-    ThinkingIndicator,
     WelcomePanel,
 )
 
@@ -314,8 +311,9 @@ class MyaApp(App[None]):
         except Exception:
             pass
 
-        if notify_chat and self.is_mounted:
+        if notify_chat and self.is_running:
             s = PROVIDERS.get(self.provider, PROVIDERS["mya"])
+
             conv = self.query_one("#conversation", VerticalScroll)
             conv.mount(
                 ChatMessage(
@@ -415,8 +413,10 @@ class MyaApp(App[None]):
                 self._user_display_name = config.user.display_name
             if config.mya.home:
                 self._mya_home = Path(config.mya.home)
-            if getattr(config, "model", None) and config.model.default:
-                self.set_model(config.model.default)
+            model_cfg = getattr(config, "model", None)
+            if model_cfg and getattr(model_cfg, "default", None):
+                self.set_model(model_cfg.default)
+
             if getattr(config, "ui", None) and config.ui.theme and config.ui.theme != "default":
                 try:
                     ThemeRegistry.get_instance().set_active_theme(config.ui.theme)
@@ -1044,7 +1044,7 @@ class MyaApp(App[None]):
             )
 
     def _handle_model_command(self, argument: str) -> None:
-        """Handle /model command to view, discover, filter, or switch the active LLM (§10, §11, §12, §13)."""
+        """Handle /model command to view, discover, filter, or switch active LLM (§10, §11, §12)."""
         badge = format_command_badge("/model")
         arg = argument.strip()
 
@@ -1106,17 +1106,16 @@ class MyaApp(App[None]):
                 lines.append("  [dim]No hay modelos disponibles con la credencial activa.[/dim]")
 
             if effective.restricted_models:
-                lines.append(
-                    f"\n[dim]Modelos restringidos para esta credencial: {', '.join(effective.restricted_models)}[/dim]"
-                )
+                restr = ", ".join(effective.restricted_models)
+                lines.append(f"\n[dim]Modelos restringidos: {restr}[/dim]")
 
             lines.extend(
                 [
                     "",
                     "[dim]Uso:[/dim]",
-                    "  • [bold]/model <id>[/bold]        Seleccionar modelo (ej: gpt-4o, claude-3-5-sonnet-latest)",
-                    "  • [bold]/model <filtro>[/bold]    Filtrar catálogo (ej: /model coder, /model mini)",
-                    "  • [bold]/model refresh[/bold]     Actualizar catálogo en vivo desde el proveedor",
+                    "  • [bold]/model <id>[/bold]        Seleccionar modelo (ej: gpt-4o, claude)",
+                    "  • [bold]/model <filtro>[/bold]    Filtrar catálogo (ej: /model coder)",
+                    "  • [bold]/model refresh[/bold]     Actualizar catálogo en vivo",
                 ]
             )
             self._append_mya_message("\n".join(lines))
@@ -1187,26 +1186,28 @@ class MyaApp(App[None]):
             self._refresh_ui_model()
 
             self._append_mya_message(
-                f"{badge} [bold green]✓ Modelo cambiado a:[/bold green] [bold cyan]{matched_id}[/bold cyan]\n"
+                f"{badge} [bold green]✓ Modelo cambiado:[/bold green] "
+                f"[bold cyan]{matched_id}[/bold cyan]\n"
                 f"  • Proveedor: '{target_provider}'\n"
                 f"  • Persistencia: .env (MYA_MODEL={matched_id})"
             )
             return
 
         # Guarded check: Is it in restricted or policy filtered models, or credential invalid? (§12)
+        denied_msg = f'{badge} [bold red]No puedes usar "{arg}" ahora.[/bold red]\n\n'
         if arg_lower in [m.lower() for m in effective.restricted_models]:
             self._append_mya_message(
-                f'{badge} [bold red]No puedes utilizar "{arg}" con la credencial activa.[/bold red]\n\n'
-                f"Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
-                f"Motivo:\nLa credencial actual no tiene acceso a este modelo."
+                denied_msg
+                + "Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
+                + "Motivo:\nLa credencial actual no tiene acceso a este modelo."
             )
             return
 
         if arg_lower in [m.lower() for m in effective.policy_filtered_models]:
             self._append_mya_message(
-                f'{badge} [bold red]No puedes utilizar "{arg}" con la credencial activa.[/bold red]\n\n'
-                f"Estado:\n[bold yellow]FILTRADO[/bold yellow]\n\n"
-                f"Motivo:\nEl modelo está retirado o filtrado por política del sistema."
+                denied_msg
+                + "Estado:\n[bold yellow]FILTRADO[/bold yellow]\n\n"
+                + "Motivo:\nEl modelo está retirado o filtrado por política del sistema."
             )
             return
 
@@ -1214,9 +1215,9 @@ class MyaApp(App[None]):
 
         if effective.credential_status in (CredentialStatus.INVALID, CredentialStatus.REVOKED):
             self._append_mya_message(
-                f'{badge} [bold red]No puedes utilizar "{arg}" con la credencial activa.[/bold red]\n\n'
-                f"Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
-                f"Motivo:\nLa credencial para '{target_provider}' no es válida o fue revocada."
+                denied_msg
+                + "Estado:\n[bold yellow]NO DISPONIBLE[/bold yellow]\n\n"
+                + f"Motivo:\nLa credencial para '{target_provider}' no es válida o fue revocada."
             )
             return
 
@@ -1242,8 +1243,8 @@ class MyaApp(App[None]):
 
         # No model matched and query returned nothing
         self._append_mya_message(
-            f"{badge} [bold yellow]No se encontraron modelos disponibles que coincidan con:[/bold yellow] '{arg}'\n"
-            f"[dim]Ejecute /model para ver la lista completa o /model refresh para actualizar.[/dim]"
+            f"{badge} [bold yellow]No se encontraron modelos para:[/bold yellow] '{arg}'\n"
+            "[dim]Ejecute /model para ver la lista completa o /model refresh.[/dim]"
         )
 
     async def _handle_memory_command(self, argument: str) -> None:
@@ -1286,14 +1287,14 @@ class MyaApp(App[None]):
                 self._append_mya_message(
                     f"{badge} [bold]MEMORIA DEL SISTEMA[/bold]\n"
                     f"  Proyecto activo: [bold green]{active_proj}[/bold green]\n"
-                    f"  • Memoria de Proyecto: [bold]{len(proj_rec)}[/bold] hechos verificados\n"
-                    f"  • Memoria de Usuario:  [bold]{len(user_rec)}[/bold] hechos/preferencias\n"
-                    f"  • Memoria de Sesión:   [bold]{len(sess_rec)}[/bold] entradas en el turno actual\n\n"
+                    f"  • Memoria de Proyecto: [bold]{len(proj_rec)}[/bold] hechos\n"
+                    f"  • Memoria de Usuario:  [bold]{len(user_rec)}[/bold] hechos\n"
+                    f"  • Memoria de Sesión:   [bold]{len(sess_rec)}[/bold] entradas turno\n\n"
                     "[dim]Uso: /memory search <término> | /memory[/dim]"
                 )
             else:
                 self._append_mya_message(
-                    f"{badge} Memoria compartida activa para el proyecto [bold]{active_proj}[/bold]."
+                    f"{badge} Memoria activa para [bold]{active_proj}[/bold]."
                 )
         elif arg.lower().startswith("search "):
             query = arg[7:].strip()
@@ -1347,7 +1348,9 @@ class MyaApp(App[None]):
                     )
             else:
                 lines.append("  • [dim]No hay skills registradas actualmente.[/dim]")
-            lines.append("\n[dim]Uso: /skills | /skills search <query> | /skills show <skill>[/dim]")
+            lines.append(
+                "\n[dim]Uso: /skills | /skills search <query> | /skills show <skill>[/dim]"
+            )
             self._append_mya_message("\n".join(lines))
         elif arg.lower().startswith("search "):
             query = arg[7:].strip().lower()
@@ -1389,7 +1392,7 @@ class MyaApp(App[None]):
                 self._append_mya_message(f"{badge} Skill '{target}' no encontrada en el registry.")
         else:
             self._append_mya_message(
-                f"{badge} Subcomando no reconocido. Uso: /skills | /skills search <query> | /skills show <skill>"
+                f"{badge} Subcomando no reconocido. Uso: /skills | /skills search | /skills show"
             )
 
     async def _handle_init_command(self, argument: str) -> None:
@@ -1398,7 +1401,7 @@ class MyaApp(App[None]):
         repo_root = getattr(self.session, "repo_root", None)
         if not repo_root or not Path(repo_root).is_dir():
             self._append_mya_message(
-                f"{badge} [bold red]No hay un proyecto activo o directorio de repositorio asociado a la sesión actual.[/bold red]"
+                f"{badge} [bold red]No hay un proyecto activo asociado a la sesión.[/bold red]"
             )
             return
 
@@ -1428,8 +1431,9 @@ class MyaApp(App[None]):
             )
 
         if result.get("status") == "error":
+            reason = result.get("reason")
             self._append_mya_message(
-                f"{badge} [bold red]Error al inicializar proyecto:[/bold red] {result.get('reason')}"
+                f"{badge} [bold red]Error al inicializar proyecto:[/bold red] {reason}"
             )
             return
 
@@ -1437,8 +1441,9 @@ class MyaApp(App[None]):
         checked = result.get("checked", [])
         backup = result.get("backup")
 
+        hdr = "RESET DE PROYECTO" if is_reset else "ESTRUCTURA DE PROYECTO"
         lines = [
-            f"{badge} [bold]{'REINICIALIZACIÓN / RESET' if is_reset else 'ESTRUCTURA DE PROYECTO MYA'}[/bold]",
+            f"{badge} [bold]{hdr}[/bold]",
             f"  Directorio: [dim]{root}[/dim]",
         ]
         if backup:
@@ -1449,11 +1454,13 @@ class MyaApp(App[None]):
             for item in created:
                 lines.append(f"    [green]+[/green] {item}")
         else:
-            lines.append("  [cyan]• Todos los directorios y archivos requeridos ya estaban presentes.[/cyan]")
+            lines.append(
+                "  [cyan]• Todos los directorios y archivos requeridos ya estaban presentes.[/cyan]"
+            )
 
         lines.append(f"  [dim]• Elementos verificados ({len(checked)}): {', '.join(checked)}[/dim]")
         if not is_reset:
-            lines.append("\n[dim]Nota: Usa [bold]/init reset[/bold] para regenerar MYA.md con respaldo automático.[/dim]")
+            lines.append("\n[dim]Nota: Usa [bold]/init reset[/bold] para regenerar MYA.md.[/dim]")
 
         self._append_mya_message("\n".join(lines))
 

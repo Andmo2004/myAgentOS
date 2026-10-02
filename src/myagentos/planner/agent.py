@@ -93,9 +93,7 @@ class PlannerAgent:
 
         # Normalize risk level
         risk_str = parsed.preliminary_risk.upper()
-        risk_level = (
-            RiskLevel(risk_str) if risk_str in RiskLevel.__members__ else RiskLevel.LOW
-        )
+        risk_level = RiskLevel(risk_str) if risk_str in RiskLevel.__members__ else RiskLevel.LOW
 
         # Normalize data classification
         data_str = parsed.data_classification_max.lower()

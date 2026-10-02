@@ -152,8 +152,7 @@ FAILURE_FIXTURES: list[FailureFixture] = [
             stage="BUDGET",
             exit_code=1,
             raw_output=(
-                "BUDGET_EXHAUSTED: Token budget exceeded for job. "
-                "Max cost of 10.00 USD exceeded."
+                "BUDGET_EXHAUSTED: Token budget exceeded for job. Max cost of 10.00 USD exceeded."
             ),
             error_type="BudgetExhausted",
         ),

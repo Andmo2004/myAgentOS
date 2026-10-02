@@ -399,7 +399,4 @@ class ContextCompiler:
 
     def _is_path_allowed(self, path: str, allowed_patterns: list[str]) -> bool:
         """Glob pattern matcher for path permission scopes."""
-        return any(
-            fnmatch(path, pat) or fnmatch(Path(path).name, pat)
-            for pat in allowed_patterns
-        )
+        return any(fnmatch(path, pat) or fnmatch(Path(path).name, pat) for pat in allowed_patterns)

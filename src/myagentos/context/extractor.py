@@ -320,7 +320,7 @@ class StructuralExtractor:
         ]
 
         for c in classes:
-            doc_snippet = f"  \"\"\"{c.docstring}\"\"\"" if c.docstring else ""
+            doc_snippet = f'  """{c.docstring}"""' if c.docstring else ""
             lines.append(f"{c.signature}:")
             if doc_snippet:
                 lines.append(doc_snippet)
@@ -334,6 +334,6 @@ class StructuralExtractor:
         for f in functions:
             lines.append(f"{f.signature}: ...")
             if f.docstring:
-                lines.append(f"  \"\"\"{f.docstring}\"\"\"")
+                lines.append(f'  """{f.docstring}"""')
 
         return "\n".join(lines)
