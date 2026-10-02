@@ -3,7 +3,7 @@
 import argparse
 import json
 import sys
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -413,11 +413,15 @@ def cmd_run(
     repo_path: str = ".",
     auto_approve: bool = False,
     model_id: str = "mock",
+    connection_id: str | None = None,
 ) -> None:
     root = Path(repo_path).resolve()
     console.print("[bold cyan]myagentos — Executing Autonomous Pipeline (§8)[/bold cyan]")
     console.print(f"Target Repository: [green]{root}[/green]")
-    console.print(f"Task Prompt: [magenta]{prompt}[/magenta]\n")
+    console.print(f"Task Prompt: [magenta]{prompt}[/magenta]")
+    if connection_id:
+        console.print(f"Plan Connection: [yellow]{connection_id}[/yellow]")
+    console.print()
 
     plan_cb = None
     diff_cb = None
@@ -449,6 +453,7 @@ def cmd_run(
         use_worktree=True,
         approval_callback=plan_cb,
         diff_approval_callback=diff_cb,
+        connection_id=connection_id,
     )
     orchestrator = PipelineOrchestrator(config=config)
     result = orchestrator.run(prompt)
@@ -743,6 +748,20 @@ def cmd_mya(
 
     if cmd == "/info":
         console.print(obs.render_info(session))
+    elif cmd in ("/connect", "/account"):
+        parts = argument.strip().split(maxsplit=1)
+        subaction = parts[0].lower() if parts else "status"
+        sub_arg = parts[1] if len(parts) > 1 else None
+        if subaction in ("chatgpt", "openai"):
+            cmd_model(action="connect", target="openai")
+        elif subaction in ("claude", "anthropic"):
+            cmd_model(action="connect", target="claude")
+        elif subaction in ("disconnect", "remove"):
+            cmd_model(action="disconnect", target=sub_arg)
+        elif subaction == "list":
+            cmd_model(action="list")
+        else:
+            cmd_model(action="status", target=sub_arg)
     elif cmd == "/telemetry":
         console.print(obs.render_telemetry(session.current_job_id))
     elif cmd == "/monitor":
@@ -933,6 +952,355 @@ def cmd_setup(
     )
 
 
+def cmd_model(
+    action: str,
+    target: str | None = None,
+    sub_target: str | None = None,
+    auth: str | None = None,
+    no_browser: bool = False,
+    refresh: bool = False,
+    json_output: bool = False,
+) -> None:
+    """Manage model subscription plan connections (§AO-MODEL-PLAN-CONNECT-01)."""
+    from myagentos.gateway.chatgpt_plan_adapter import ChatGPTPlanAdapter
+    from myagentos.gateway.claude_code_adapter import ClaudeCodeAdapter
+    from myagentos.gateway.client import ModelGateway
+    from myagentos.gateway.credentials import CredentialStatus
+    from myagentos.gateway.oauth_openai import OpenAIOAuthClient
+    from myagentos.gateway.plan_connection import (
+        ConnectionAuthKind,
+        ConnectionPlatform,
+        ConnectionServiceStatus,
+        PlanConnectionProfile,
+    )
+
+    gateway = ModelGateway()
+
+    # Normalization:
+    # "myagentos model connection list" -> action="list", target=None
+    # "myagentos model connection status <id>" -> action="status", target=<id>
+    if action == "connection":
+        sub_act = (target or "list").lower().strip()
+        if sub_act in ("list", "ls"):
+            action = "list"
+            target = None
+        elif sub_act in ("status", "info"):
+            action = "status"
+            target = sub_target
+        else:
+            console.print(
+                f"[red]Unknown connection sub-action '{sub_act}'. Use 'list' or 'status'.[/red]"
+            )
+            sys.exit(1)
+
+    if action == "connect":
+        provider = (target or "").lower().strip()
+        if not provider:
+            console.print("[red]Missing provider for connect. Specify 'openai' or 'claude'.[/red]")
+            sys.exit(1)
+
+        if provider in ("openai", "chatgpt"):
+            auth_method = (auth or "oauth").lower().strip()
+            if auth_method != "oauth":
+                console.print(
+                    f"[red]Unsupported auth method '{auth_method}' for OpenAI. "
+                    "Use '--auth oauth'.[/red]"
+                )
+                sys.exit(1)
+
+            console.print("[cyan]Initiating PKCE OAuth flow for ChatGPT Plus/Pro...[/cyan]")
+            oauth_client = OpenAIOAuthClient(store=gateway.credential_store)
+
+            def _on_url(url: str) -> None:
+                console.print(f"[bold green]Authorization URL:[/bold green]\n{url}\n")
+                if no_browser:
+                    console.print(
+                        "[yellow]Please open the URL above in your browser to login.[/yellow]"
+                    )
+
+            try:
+                profile = oauth_client.connect_interactive(
+                    open_browser=not no_browser,
+                    on_url_ready=_on_url if no_browser else None,
+                )
+            except Exception as e:
+                console.print(f"[red]OAuth authentication failed:[/red] {e}")
+                sys.exit(1)
+
+            # Discover models via adapter
+            try:
+                chatgpt_adapter = ChatGPTPlanAdapter(
+                    connection_profile=profile, store=gateway.credential_store
+                )
+                models = chatgpt_adapter.discover_models()
+                model_ids = [m.model_id for m in models]
+            except Exception:
+                model_ids = ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]
+
+            profile = profile.model_copy(
+                update={"models": model_ids, "status": ConnectionServiceStatus.READY}
+            )
+            gateway.credential_store.save_profile(profile)
+            gateway.load_persisted_connections()
+
+            if json_output:
+                console.print(json.dumps(profile.model_dump(mode="json"), indent=2))
+                return
+
+            table = Table(title="ChatGPT Plan Connection Established")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Connection ID", profile.connection_id)
+            table.add_row("Platform", profile.platform.value)
+            table.add_row("Auth Method", profile.auth_kind.value)
+            table.add_row("Account", profile.account_label)
+            table.add_row("Status", profile.status.value)
+            table.add_row("Models", ", ".join(profile.models) if profile.models else "none")
+            console.print(table)
+            console.print(
+                f"\n[green]✓ Connected successfully.[/green] "
+                f"Use with: [bold]myagentos run --connection {profile.connection_id}[/bold]"
+            )
+
+        elif provider in ("claude", "anthropic"):
+            auth_method = (auth or "cli").lower().strip()
+            if auth_method != "cli":
+                console.print(
+                    f"[red]Unsupported auth method '{auth_method}' for Claude. "
+                    "Use '--auth cli'.[/red]"
+                )
+                sys.exit(1)
+
+            conn_id = sub_target or "conn_claude_cli"
+            profile = PlanConnectionProfile(
+                connection_id=conn_id,
+                provider="anthropic",
+                platform=ConnectionPlatform.CLAUDE,
+                auth_kind=ConnectionAuthKind.CLI_DELEGATED,
+                account_label="Claude CLI Delegated",
+                status=ConnectionServiceStatus.READY,
+                tier="pro",
+                last_validated_at=datetime.now(UTC),
+            )
+            claude_adapter = ClaudeCodeAdapter(connection_profile=profile)
+            status, err_msg, identity = claude_adapter.validate_credential()
+
+            if status == CredentialStatus.PROVIDER_UNAVAILABLE:
+                console.print("[red]Claude Code CLI is not installed.[/red]")
+                console.print(f"Details: {err_msg}")
+                console.print(
+                    "Please install Claude Code CLI via: npm install -g @anthropic-ai/claude-code"
+                )
+                sys.exit(1)
+
+            if status != CredentialStatus.VALID:
+                console.print(
+                    f"[red]Claude Code CLI is not authenticated with claude.ai:[/red] {err_msg}"
+                )
+                console.print(
+                    "Please run [bold]claude[/bold] or [bold]claude login[/bold] "
+                    "to log in with your Claude Pro/Max account."
+                )
+                sys.exit(1)
+
+            account_label = identity.principal_name if identity else "Claude Pro/Max Account"
+            disc_models = claude_adapter.discover_models()
+            model_ids = [m.model_id for m in disc_models]
+
+            profile = profile.model_copy(
+                update={"account_label": account_label, "models": model_ids}
+            )
+            gateway.credential_store.save_profile(profile)
+            gateway.load_persisted_connections()
+
+            if json_output:
+                console.print(json.dumps(profile.model_dump(mode="json"), indent=2))
+                return
+
+            table = Table(title="Claude Code Plan Connection Established")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+            table.add_row("Connection ID", profile.connection_id)
+            table.add_row("Platform", profile.platform.value)
+            table.add_row("Auth Method", profile.auth_kind.value)
+            table.add_row("Account", profile.account_label)
+            table.add_row("Status", profile.status.value)
+            table.add_row("Models", ", ".join(profile.models) if profile.models else "none")
+            console.print(table)
+            console.print(
+                f"\n[green]✓ Connected successfully.[/green] "
+                f"Use with: [bold]myagentos run --connection {profile.connection_id}[/bold]"
+            )
+
+        else:
+            console.print(
+                f"[red]Unknown provider '{provider}'. Supported: 'openai', 'claude'.[/red]"
+            )
+            sys.exit(1)
+
+    elif action in ("list", "ls"):
+        profiles = gateway.list_plan_connections()
+        if not profiles:
+            profiles = gateway.credential_store.list_profiles()
+
+        if json_output:
+            console.print(json.dumps([p.model_dump(mode="json") for p in profiles], indent=2))
+            return
+
+        if not profiles:
+            console.print("[yellow]No active model plan connections found.[/yellow]")
+            console.print(
+                "To connect a subscription, run: [bold]myagentos model connect openai|claude[/bold]"
+            )
+            return
+
+        table = Table(title="Active Model Plan Connections")
+        table.add_column("Connection ID", style="cyan")
+        table.add_column("Platform", style="magenta")
+        table.add_column("Auth Kind", style="blue")
+        table.add_column("Tier", style="yellow")
+        table.add_column("Status", style="green")
+        table.add_column("Account", style="white")
+        table.add_column("Models", style="dim")
+
+        for p in profiles:
+            st = p.status
+            status_style = (
+                "green"
+                if st == ConnectionServiceStatus.READY
+                else ("red" if st == ConnectionServiceStatus.QUOTA_EXHAUSTED else "yellow")
+            )
+            table.add_row(
+                p.connection_id,
+                p.platform.value,
+                p.auth_kind.value,
+                p.tier,
+                f"[{status_style}]{st.value}[/{status_style}]",
+                p.account_label,
+                ", ".join(p.models[:3]) + ("..." if len(p.models) > 3 else ""),
+            )
+        console.print(table)
+
+    elif action in ("status", "info"):
+        if not target:
+            console.print("[red]Missing connection ID for status check.[/red]")
+            sys.exit(1)
+        conn_id = target
+
+        found_profile = gateway.get_plan_connection(
+            conn_id
+        ) or gateway.credential_store.get_profile(conn_id)
+        if not found_profile:
+            console.print(f"[red]Connection '{conn_id}' not found.[/red]")
+            sys.exit(1)
+
+        active_profile = found_profile
+        if refresh:
+            if active_profile.platform in (
+                ConnectionPlatform.CHATGPT_PLAN,
+                ConnectionPlatform.OPENAI,
+            ):
+                oauth_client = OpenAIOAuthClient(store=gateway.credential_store)
+                try:
+                    oauth_client.refresh_access_token(conn_id)
+                    active_profile = active_profile.model_copy(
+                        update={
+                            "status": ConnectionServiceStatus.READY,
+                            "last_validated_at": datetime.now(UTC),
+                            "error_message": None,
+                        }
+                    )
+                    gateway.credential_store.save_profile(active_profile)
+                    gateway.load_persisted_connections()
+                except Exception as e:
+                    active_profile = active_profile.model_copy(
+                        update={
+                            "status": ConnectionServiceStatus.DEGRADED,
+                            "error_message": str(e),
+                        }
+                    )
+                    gateway.credential_store.save_profile(active_profile)
+            elif active_profile.platform in (
+                ConnectionPlatform.CLAUDE,
+                ConnectionPlatform.CLAUDE_CODE,
+            ):
+                status_claude_adapter = ClaudeCodeAdapter(connection_profile=active_profile)
+                c_status, err, _ = status_claude_adapter.validate_credential()
+                new_status = (
+                    ConnectionServiceStatus.READY
+                    if c_status == CredentialStatus.VALID
+                    else ConnectionServiceStatus.DEGRADED
+                )
+                active_profile = active_profile.model_copy(
+                    update={
+                        "status": new_status,
+                        "error_message": err,
+                        "last_validated_at": datetime.now(UTC),
+                    }
+                )
+                gateway.credential_store.save_profile(active_profile)
+
+        if json_output:
+            console.print(json.dumps(active_profile.model_dump(mode="json"), indent=2))
+            return
+
+        table = Table(title=f"Plan Connection Status: {conn_id}")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="green")
+        table.add_row("Connection ID", active_profile.connection_id)
+        table.add_row("Platform", active_profile.platform.value)
+        table.add_row("Auth Method", active_profile.auth_kind.value)
+        table.add_row("Account", active_profile.account_label)
+        table.add_row("Tier", active_profile.tier)
+        table.add_row("Status", active_profile.status.value)
+        table.add_row(
+            "Last Validated",
+            active_profile.last_validated_at.isoformat()
+            if active_profile.last_validated_at
+            else "Never",
+        )
+        if active_profile.error_message:
+            table.add_row("Error", active_profile.error_message)
+        models_str = ", ".join(active_profile.models) if active_profile.models else "none"
+        table.add_row("Models", models_str)
+        console.print(table)
+
+    elif action == "disconnect":
+        if not target:
+            console.print("[red]Missing connection ID for disconnect.[/red]")
+            sys.exit(1)
+        conn_id = target
+
+        found_to_delete = gateway.get_plan_connection(
+            conn_id
+        ) or gateway.credential_store.get_profile(conn_id)
+        if not found_to_delete:
+            console.print(f"[red]Connection '{conn_id}' not found.[/red]")
+            sys.exit(1)
+
+        if found_to_delete.platform in (
+            ConnectionPlatform.CHATGPT_PLAN,
+            ConnectionPlatform.OPENAI,
+        ):
+            oauth_client = OpenAIOAuthClient(store=gateway.credential_store)
+            try:
+                oauth_client.revoke_and_disconnect(conn_id)
+            except Exception:
+                pass
+
+        gateway.remove_plan_connection(conn_id, delete_stored=True)
+        console.print(
+            f"[green]✓ Successfully disconnected and purged credentials for '{conn_id}'.[/green]"
+        )
+
+    else:
+        console.print(
+            f"[red]Unknown model action '{action}'. "
+            "Use connect, connection, list, or disconnect.[/red]"
+        )
+        sys.exit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="myagentos", description="Agentic OS CLI")
     subparsers = parser.add_subparsers(dest="subcommand", required=False)
@@ -943,6 +1311,11 @@ def main() -> None:
     p_run.add_argument("--repo", default=".", help="Repository root path")
     p_run.add_argument("--auto-approve", action="store_true", help="Auto-approve plan and diff")
     p_run.add_argument("--model", default="mock", help="Model ID for Planner and Worker")
+    p_run.add_argument(
+        "--connection",
+        default=None,
+        help="Plan connection ID (e.g. conn_chatgpt_plus, conn_claude_cli)",
+    )
 
     # route command
     p_route = subparsers.add_parser("route", help="Route prompt locally")
@@ -1079,6 +1452,52 @@ def main() -> None:
         help="Force re-setup even if already configured",
     )
 
+    # model command (§AO-MODEL-PLAN-CONNECT-01)
+    p_model = subparsers.add_parser(
+        "model",
+        help="Manage model subscription plan connections (§AO-MODEL-PLAN-CONNECT-01)",
+    )
+    p_model.add_argument(
+        "action",
+        nargs="?",
+        default="list",
+        choices=["connect", "connection", "list", "status", "disconnect"],
+        help="Model management action (connect, connection, list, status, disconnect)",
+    )
+    p_model.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Provider (openai/claude), sub-action (list/status), or connection ID",
+    )
+    p_model.add_argument(
+        "sub_target",
+        nargs="?",
+        default=None,
+        help="Secondary parameter (e.g. connection ID for 'connection status')",
+    )
+    p_model.add_argument(
+        "--auth",
+        default=None,
+        choices=["oauth", "cli"],
+        help="Authentication method (oauth or cli)",
+    )
+    p_model.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open browser automatically for OAuth",
+    )
+    p_model.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh connection token or status",
+    )
+    p_model.add_argument(
+        "--json",
+        action="store_true",
+        help="Output as JSON",
+    )
+
     args = parser.parse_args()
 
     if args.subcommand is None:
@@ -1093,6 +1512,7 @@ def main() -> None:
             repo_path=args.repo,
             auto_approve=args.auto_approve,
             model_id=args.model,
+            connection_id=getattr(args, "connection", None),
         )
     elif args.subcommand == "route":
         cmd_route(args.prompt)
@@ -1137,6 +1557,16 @@ def main() -> None:
             mya_home=args.mya_home,
             non_interactive=args.non_interactive,
             force=args.force,
+        )
+    elif args.subcommand == "model":
+        cmd_model(
+            action=args.action,
+            target=args.target,
+            sub_target=args.sub_target,
+            auth=args.auth,
+            no_browser=args.no_browser,
+            refresh=args.refresh,
+            json_output=args.json,
         )
 
 

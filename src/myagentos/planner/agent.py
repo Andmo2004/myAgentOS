@@ -46,10 +46,12 @@ class PlannerAgent:
         gateway: ModelGateway,
         model_id: str = "mock-planner",
         event_store: EventStore | None = None,
+        connection_id: str | None = None,
     ) -> None:
         self.gateway = gateway
         self.model_id = model_id
         self.event_store = event_store
+        self.connection_id = connection_id
 
     def generate_plan(self, input_data: PlannerInput) -> PlanSpec:
         """Executes Planner inference to generate an authoritative PlanSpec (§8.3)."""
@@ -73,6 +75,7 @@ class PlannerAgent:
             model_id=self.model_id,
             temperature=0.0,
             response_schema=PlanResponseSchema,
+            connection_id=self.connection_id,
         )
 
         if self.event_store:

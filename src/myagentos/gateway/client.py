@@ -12,15 +12,23 @@ from pydantic import BaseModel
 
 from myagentos.core.errors import MyAgentOSError
 from myagentos.gateway.base import LLMMessage, LLMResponse, ProviderAdapter
+from myagentos.gateway.credential_store import CredentialStore
 from myagentos.gateway.credentials import (
     CredentialProfile,
     CredentialStatus,
     derive_fingerprint,
 )
 from myagentos.gateway.discovery import (
+    DiscoveredModel,
     DiscoveredModelSet,
     DiscoveryCache,
     EffectiveModelSet,
+)
+from myagentos.gateway.plan_connection import (
+    ConnectionServiceStatus,
+    PlanConnectionError,
+    PlanConnectionProfile,
+    PlanUsageLimitError,
 )
 from myagentos.gateway.registry import ModelRegistry
 
@@ -44,11 +52,18 @@ class ModelGateway:
         self,
         registry: ModelRegistry | None = None,
         discovery_ttl_seconds: int = 300,
+        credential_store: CredentialStore | None = None,
+        auto_load_plan_connections: bool = True,
     ) -> None:
         self.registry = registry or ModelRegistry()
         self.adapters: dict[str, ProviderAdapter] = {}
+        self._plan_connections: dict[str, PlanConnectionProfile] = {}
+        self._plan_adapters: dict[str, ProviderAdapter] = {}
         self.discovery_cache = DiscoveryCache(default_ttl_seconds=discovery_ttl_seconds)
         self._credential_profiles: dict[str, CredentialProfile] = {}
+        self.credential_store = credential_store or CredentialStore()
+        if auto_load_plan_connections:
+            self.load_persisted_connections()
 
     def _normalize_provider(self, provider: str) -> str:
         p = provider.lower().strip()
@@ -61,6 +76,80 @@ class ModelGateway:
         self.adapters[norm] = adapter
         if norm == "google":
             self.adapters["gemini"] = adapter
+
+    def load_persisted_connections(self) -> None:
+        """Loads persisted plan connection profiles and configures adapters (§4, §5)."""
+        try:
+            for profile in self.credential_store.list_profiles():
+                adapter = self._build_plan_adapter(profile)
+                if adapter:
+                    self.register_plan_connection(profile, adapter, persist=False)
+        except Exception:
+            pass
+
+    def _build_plan_adapter(self, profile: PlanConnectionProfile) -> ProviderAdapter | None:
+        from myagentos.gateway.plan_connection import ConnectionPlatform
+
+        if profile.platform in (ConnectionPlatform.CHATGPT_PLAN, ConnectionPlatform.OPENAI):
+            from myagentos.gateway.chatgpt_plan_adapter import ChatGPTPlanAdapter
+
+            return ChatGPTPlanAdapter(connection_profile=profile, store=self.credential_store)
+        elif profile.platform in (ConnectionPlatform.CLAUDE, ConnectionPlatform.CLAUDE_CODE):
+            from myagentos.gateway.claude_code_adapter import ClaudeCodeAdapter
+
+            return ClaudeCodeAdapter(connection_profile=profile)
+        return None
+
+    def register_plan_connection(
+        self,
+        profile: PlanConnectionProfile,
+        adapter: ProviderAdapter,
+        persist: bool = True,
+    ) -> None:
+        """Registers an authenticated plan connection and its dedicated adapter (§4, §5)."""
+        self._plan_connections[profile.connection_id] = profile
+        self._plan_adapters[profile.connection_id] = adapter
+        if persist:
+            try:
+                self.credential_store.save_profile(profile)
+            except Exception:
+                pass
+
+    def get_plan_connection(self, connection_id: str) -> PlanConnectionProfile | None:
+        """Returns the public connection profile for connection_id."""
+        return self._plan_connections.get(connection_id)
+
+    def get_plan_adapter(self, connection_id: str) -> ProviderAdapter | None:
+        """Returns the provider adapter bound to connection_id."""
+        return self._plan_adapters.get(connection_id)
+
+    def list_plan_connections(self) -> list[PlanConnectionProfile]:
+        """Lists all registered plan connection profiles."""
+        return list(self._plan_connections.values())
+
+    def remove_plan_connection(
+        self, connection_id: str, delete_stored: bool = False
+    ) -> bool:
+        """Removes a plan connection and its adapter from the gateway."""
+        existed = connection_id in self._plan_connections
+        self._plan_connections.pop(connection_id, None)
+        self._plan_adapters.pop(connection_id, None)
+        if delete_stored:
+            try:
+                self.credential_store.delete_profile(connection_id)
+                self.credential_store.delete_credential(connection_id)
+            except Exception:
+                pass
+        return existed
+
+    def discover_plan_models(self, connection_id: str) -> list[DiscoveredModel]:
+        """Discovers accessible models from a plan connection catalog (§6)."""
+        adapter = self.get_plan_adapter(connection_id)
+        if adapter is None:
+            raise PlanConnectionError(
+                f"No adapter registered for plan connection '{connection_id}'"
+            )
+        return adapter.discover_models()
 
     def get_adapter(self, provider: str) -> ProviderAdapter | None:
         norm = self._normalize_provider(provider)
@@ -212,10 +301,33 @@ class ModelGateway:
         model_id: str,
         provider: str | None = None,
         platform: str = "api",
+        connection_id: str | None = None,
         temperature: float = 0.0,
         response_schema: type[BaseModel] | None = None,
     ) -> LLMResponse:
         """Dispatches an inference request through the registered provider adapter (§17.1)."""
+        # If bound to an explicit plan connection (§4, §7)
+        if connection_id:
+            plan_adapter = self.get_plan_adapter(connection_id)
+            if plan_adapter is None:
+                raise PlanConnectionError(
+                    f"No active adapter found for connection '{connection_id}'",
+                    platform=platform,
+                )
+            profile = self.get_plan_connection(connection_id)
+            if profile and profile.status == ConnectionServiceStatus.QUOTA_EXHAUSTED:
+                raise PlanUsageLimitError(
+                    f"Connection '{connection_id}' quota is exhausted; new calls are paused.",
+                    platform=profile.platform.value,
+                    code="quota_exhausted",
+                )
+            return plan_adapter.generate(
+                messages=messages,
+                model_id=model_id,
+                temperature=temperature,
+                response_schema=response_schema,
+            )
+
         resolved_provider = provider
 
         # Attempt to resolve from registry

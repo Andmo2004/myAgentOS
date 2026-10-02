@@ -45,6 +45,8 @@ class SlashCommandKind(StrEnum):
     # Configuration
     KEY = "key"
     MODEL = "model"
+    CONNECT = "connect"
+    ACCOUNT = "connect"  # compatibility alias
     CATEGORIZE = "categorize"
     INIT = "init"
 
@@ -100,6 +102,8 @@ _SLASH_MAP: dict[str, SlashCommandKind] = {
     "/key": SlashCommandKind.KEY,
     "/keys": SlashCommandKind.KEY,
     "/model": SlashCommandKind.MODEL,
+    "/connect": SlashCommandKind.CONNECT,
+    "/account": SlashCommandKind.CONNECT,
     "/categorize": SlashCommandKind.CATEGORIZE,
     "/init": SlashCommandKind.INIT,
     # Appearance

@@ -822,6 +822,9 @@ class MyaApp(App[None]):
             case SlashCommandKind.MODEL:
                 self._handle_model_command(cmd.argument)
 
+            case SlashCommandKind.CONNECT:
+                await self._handle_connect_command(cmd.argument)
+
             case SlashCommandKind.NATURAL | SlashCommandKind.MYA:
                 prompt = cmd.argument if cmd.kind == SlashCommandKind.MYA else cmd.raw_input
                 await self._handle_natural_input(prompt.strip())
@@ -1245,6 +1248,212 @@ class MyaApp(App[None]):
         self._append_mya_message(
             f"{badge} [bold yellow]No se encontraron modelos para:[/bold yellow] '{arg}'\n"
             "[dim]Ejecute /model para ver la lista completa o /model refresh.[/dim]"
+        )
+
+    async def _handle_connect_command(self, argument: str) -> None:
+        """Handle /connect and /account command to manage plan connections (§10)."""
+        badge = format_command_badge("/connect")
+        args = argument.strip().split()
+        subcmd = args[0].lower() if args else ""
+        store = getattr(self.gateway, "credential_store", None)
+        if not store:
+            from myagentos.gateway.credential_store import CredentialStore
+
+            store = CredentialStore()
+
+        if not subcmd or subcmd in ("status", "info"):
+            profiles = store.list_profiles()
+            if not profiles:
+                self._append_mya_message(
+                    f"{badge} [bold]CONEXIONES DE CUENTA Y PLAN (SUSCRIPCIÓN)[/bold]\n\n"
+                    "[bold]Conectar tu suscripción:[/bold]\n"
+                    "  • [bold cyan]/connect chatgpt[/bold cyan] OAuth ChatGPT Plus/Pro\n"
+                    "  • [bold cyan]/connect claude[/bold cyan]  Claude Code (claude.ai)\n"
+                    "  • [bold cyan]/connect status[/bold cyan]  Estado de cuentas y cuotas\n"
+                    "  • [bold cyan]/connect list[/bold cyan]    Modelos accesibles\n"
+                    "  • [bold cyan]/connect disconnect <id>[/bold cyan] Desconectar\n\n"
+                    "[dim]Nota: Tu suscripción se usa sin claves API y sin riesgo.[/dim]"
+                )
+                return
+
+            lines = [f"{badge} [bold]CONEXIONES DE CUENTA Y PLAN ACTIVAS[/bold]\n"]
+            for p in profiles:
+                status_color = "green" if p.status.value == "ready" else "yellow"
+                lines.append(f"  • [bold]{p.connection_id}[/bold] ({p.platform.value})")
+                lines.append(f"    - Cuenta:     [cyan]{p.account_label or 'N/A'}[/cyan]")
+                lines.append(
+                    f"    - Estado:     [{status_color}]{p.status.value.upper()}[/{status_color}]"
+                )
+                lines.append(f"    - Auth:       {p.auth_kind.value}")
+                if p.tier:
+                    lines.append(f"    - Plan/Tier:  {p.tier}")
+                if p.models:
+                    lines.append(f"    - Modelos:    {', '.join(p.models)}")
+                if p.last_validated_at:
+                    val_str = p.last_validated_at.strftime("%Y-%m-%d %H:%M")
+                    lines.append(f"    - Validado:   {val_str}")
+                lines.append("")
+
+            lines.append(
+                "[dim]Comandos: /connect chatgpt | /connect claude | /connect disconnect <id>[/dim]"
+            )
+            self._append_mya_message("\n".join(lines))
+            return
+
+        if subcmd in ("chatgpt", "openai", "chatgpt-plan"):
+            self._append_mya_message(
+                f"{badge} [bold cyan]Iniciando conexión con ChatGPT Plus/Pro...[/bold cyan]\n"
+                "Abriendo navegador para autenticación OAuth (PKCE)..."
+            )
+            try:
+                import asyncio
+
+                from myagentos.gateway.chatgpt_plan_adapter import ChatGPTPlanAdapter
+                from myagentos.gateway.oauth_openai import OpenAIOAuthClient
+                from myagentos.gateway.plan_connection import ConnectionServiceStatus
+
+                oauth_client = OpenAIOAuthClient(store=store)
+
+                def _flow() -> Any:
+                    prof = oauth_client.connect_interactive(open_browser=True)
+                    try:
+                        adapter = ChatGPTPlanAdapter(connection_profile=prof, store=store)
+                        disc = adapter.discover_models()
+                        m_ids = [m.model_id for m in disc]
+                    except Exception:
+                        m_ids = ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]
+                    return prof.model_copy(
+                        update={"models": m_ids, "status": ConnectionServiceStatus.READY}
+                    )
+
+                profile = await asyncio.to_thread(_flow)
+                chatgpt_adapter = ChatGPTPlanAdapter(connection_profile=profile, store=store)
+                self.gateway.register_plan_connection(profile, chatgpt_adapter, persist=True)
+                models_str = ", ".join(profile.models) if profile.models else "gpt-4o, o1"
+                self._append_mya_message(
+                    f"{badge} [bold green]✓ Conexión exitosa con ChatGPT![/bold green]\n\n"
+                    f"  • ID Conexión: [bold]{profile.connection_id}[/bold]\n"
+                    f"  • Cuenta:      [cyan]{profile.account_label}[/cyan]\n"
+                    f"  • Plan:        {profile.tier or 'Plus/Pro'}\n"
+                    f"  • Modelos:     {models_str}\n"
+                    f"  • Estado:      [bold green]{profile.status.value.upper()}[/bold green]\n\n"
+                    f"[dim]Para usar esta conexión: /model gpt-4o[/dim]"
+                )
+            except Exception as e:
+                self._append_mya_message(
+                    f"{badge} [bold red]Error conectando con ChatGPT:[/bold red] {e}"
+                )
+            return
+
+        if subcmd in ("claude", "anthropic", "claude-code"):
+            self._append_mya_message(
+                f"{badge} [bold cyan]Verificando cuenta de Claude Code...[/bold cyan]"
+            )
+            try:
+                import asyncio
+
+                from myagentos.gateway.claude_code_adapter import ClaudeCodeAdapter
+                from myagentos.gateway.credentials import CredentialStatus
+                from myagentos.gateway.plan_connection import (
+                    ConnectionAuthKind,
+                    ConnectionPlatform,
+                    ConnectionServiceStatus,
+                    PlanConnectionProfile,
+                )
+
+                adapter = ClaudeCodeAdapter()
+
+                def _validate() -> tuple[Any, str | None, Any]:
+                    return adapter.validate_credential()
+
+                status, err, identity = await asyncio.to_thread(_validate)
+                if status != CredentialStatus.VALID:
+                    self._append_mya_message(
+                        f"{badge} [bold red]No se pudo conectar Claude Code:[/bold red] {err}\n\n"
+                        "[dim]Asegúrate de haber iniciado sesión ejecutando 'claude login' en tu "
+                        "terminal y que tu método de autenticación sea 'claude.ai'.[/dim]"
+                    )
+                    return
+
+                label = (
+                    identity.principal_name
+                    if identity and identity.principal_name
+                    else "claude.ai"
+                )
+                profile = PlanConnectionProfile(
+                    connection_id="conn-anthropic-claude-code",
+                    provider="anthropic",
+                    platform=ConnectionPlatform.CLAUDE_CODE_PLAN,
+                    auth_kind=ConnectionAuthKind.CLI_DELEGATED,
+                    account_label=label,
+                    status=ConnectionServiceStatus.READY,
+                    tier="suscripción",
+                    models=[m.model_id for m in adapter.discover_models()],
+                )
+                store.save_profile(profile)
+                self.gateway.register_plan_connection(profile, adapter, persist=True)
+                models_str = ", ".join(profile.models)
+                self._append_mya_message(
+                    f"{badge} [bold green]✓ Conexión exitosa con Claude Code![/bold green]\n\n"
+                    f"  • ID Conexión: [bold]{profile.connection_id}[/bold]\n"
+                    f"  • Cuenta:      [cyan]{profile.account_label}[/cyan]\n"
+                    f"  • Estado:      [bold green]{profile.status.value.upper()}[/bold green]\n"
+                    f"  • Modelos:     {models_str}\n\n"
+                    f"[dim]Para usar esta conexión: /model claude-3-5-sonnet-latest[/dim]"
+                )
+            except Exception as e:
+                self._append_mya_message(
+                    f"{badge} [bold red]Error conectando con Claude Code:[/bold red] {e}"
+                )
+            return
+
+        if subcmd in ("disconnect", "remove", "delete"):
+            target_id = args[1] if len(args) > 1 else None
+            profiles = store.list_profiles()
+            if not target_id:
+                if len(profiles) == 1:
+                    target_id = profiles[0].connection_id
+                else:
+                    avail = ", ".join(p.connection_id for p in profiles) if profiles else "ninguna"
+                    self._append_mya_message(
+                        f"{badge} [bold yellow]Uso:[/bold yellow] "
+                        f"/connect disconnect <connection_id>\n"
+                        f"Conexiones activas: {avail}"
+                    )
+                    return
+
+            success = store.delete_profile(target_id)
+            store.delete_credential(target_id)
+            if success:
+                self._append_mya_message(
+                    f"{badge} [bold green]✓ Conexión '{target_id}' eliminada "
+                    "y credenciales purgadas.[/bold green]"
+                )
+            else:
+                self._append_mya_message(
+                    f"{badge} [bold yellow]No se encontró la conexión '{target_id}'.[/bold yellow]"
+                )
+            return
+
+        if subcmd in ("list", "models"):
+            profiles = store.list_profiles()
+            if not profiles:
+                self._append_mya_message(
+                    f"{badge} [dim]No hay cuentas de suscripción conectadas. "
+                    "Usa /connect chatgpt o /connect claude.[/dim]"
+                )
+                return
+            lines = [f"{badge} [bold]MODELOS DISPONIBLES EN TUS SUSCRIPCIONES[/bold]\n"]
+            for p in profiles:
+                lines.append(f"  • [bold]{p.account_label}[/bold] ({p.platform.value}):")
+                for m in p.models:
+                    lines.append(f"      - [cyan]{m}[/cyan]")
+            self._append_mya_message("\n".join(lines))
+            return
+
+        self._append_mya_message(
+            f"{badge} [bold red]Subcomando desconocido:[/bold red] '{subcmd}'.\n"
+            "Uso: [bold]/connect [chatgpt|claude|status|list|disconnect <id>][/bold]"
         )
 
     async def _handle_memory_command(self, argument: str) -> None:

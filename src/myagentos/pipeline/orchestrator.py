@@ -27,6 +27,7 @@ from myagentos.failure.healing import HealingCoordinator
 from myagentos.fsm.controller import JobController
 from myagentos.fsm.states import JobState
 from myagentos.gateway.client import ModelGateway
+from myagentos.gateway.plan_connection import PlanUsageLimitError
 from myagentos.pipeline.models import PipelineConfig, PipelineResult
 from myagentos.planner.agent import PlannerAgent
 from myagentos.planner.models import PlannerInput
@@ -109,6 +110,7 @@ class PipelineOrchestrator:
             gateway=self.gateway,
             model_id=config.model_id,
             event_store=self.event_store,
+            connection_id=config.connection_id,
         )
         self.worktree_manager = WorktreeManager(repo_root=self.repo_root)
         self.verification_guard = VerificationGuard(sandbox_driver=self.sandbox_driver)
@@ -160,7 +162,22 @@ class PipelineOrchestrator:
                 base_commit=base_commit,
                 version=1,
             )
-            plan = self.planner.generate_plan(planner_input)
+            try:
+                plan = self.planner.generate_plan(planner_input)
+            except PlanUsageLimitError as exc:
+                controller.transition(
+                    EventName.BUDGET_PAUSED,
+                    EventActor.JOB_CONTROLLER,
+                    payload={"reason": "SUBSCRIPTION_QUOTA_EXHAUSTED", "details": str(exc)},
+                )
+                return self._build_result(
+                    job_id=job_id,
+                    success=False,
+                    controller=controller,
+                    intent=decision.intent.value,
+                    duration_seconds=time.monotonic() - t0,
+                    summary=f"Subscription quota exhausted during planning: {exc}",
+                )
 
         controller.transition(
             EventName.PLAN_GENERATED,
@@ -273,6 +290,7 @@ class PipelineOrchestrator:
                 token=token,
                 model_id=self.config.model_id,
                 event_store=self.event_store,
+                connection_id=self.config.connection_id,
             )
             worker_result = loop.run(worker_prompt)
 
@@ -786,6 +804,22 @@ class PipelineOrchestrator:
                     f"({patch_set.total_diff_lines} lines)"
                 ),
                 duration_seconds=time.monotonic() - t0,
+            )
+
+        except PlanUsageLimitError as exc:
+            controller.transition(
+                EventName.BUDGET_PAUSED,
+                EventActor.JOB_CONTROLLER,
+                payload={"reason": "SUBSCRIPTION_QUOTA_EXHAUSTED", "details": str(exc)},
+            )
+            return self._build_result(
+                job_id=job_id,
+                success=False,
+                controller=controller,
+                intent=decision.intent.value,
+                plan=plan,
+                duration_seconds=time.monotonic() - t0,
+                summary=f"Subscription quota exhausted during execution: {exc}",
             )
 
         finally:

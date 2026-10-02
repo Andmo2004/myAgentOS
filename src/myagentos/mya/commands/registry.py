@@ -223,6 +223,19 @@ _BUILTIN_COMMANDS: list[CommandDefinition] = [
         handler="ui.model",
     ),
     CommandDefinition(
+        name="connect",
+        version="1.0.0",
+        category=CommandCategory.CONFIGURATION,
+        description=(
+            "Conectar, consultar o desconectar suscripción (ChatGPT Plus/Pro o Claude Code)"
+        ),
+        expected_cost=ExpectedCost.LOW,
+        args="[chatgpt|claude|status|list|disconnect <id>]",
+        supports_arguments=True,
+        aliases=("account",),
+        handler="ui.connect",
+    ),
+    CommandDefinition(
         name="categorize",
         version="1.0.0",
         category=CommandCategory.CONFIGURATION,

@@ -35,6 +35,7 @@ class PipelineConfig(BaseModel):
     lint_cmd: str | None = None
     test_cmd: str | None = None
     sandbox_driver: Any | None = None
+    connection_id: str | None = None
 
 
 class PipelineResult(BaseModel):

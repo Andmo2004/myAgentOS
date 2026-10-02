@@ -125,6 +125,7 @@ class WorkerLoop:
         model_id: str = "mock-worker",
         event_store: EventStore | None = None,
         mode: WorkerMode = WorkerMode.TOOL_LOOP,
+        connection_id: str | None = None,
     ) -> None:
         self.gateway = gateway
         self.broker = broker
@@ -133,6 +134,7 @@ class WorkerLoop:
         self.model_id = model_id
         self.event_store = event_store
         self.mode = mode
+        self.connection_id = connection_id
 
     def run(self, task_prompt: str) -> WorkerResult:
         """Executes the loop bounded by token steps, time, and budget (§10.3)."""
@@ -179,6 +181,7 @@ class WorkerLoop:
                 messages=messages,
                 model_id=self.model_id,
                 temperature=0.0,
+                connection_id=self.connection_id,
             )
             step_duration = int((time.time() - t0) * 1000)
 
